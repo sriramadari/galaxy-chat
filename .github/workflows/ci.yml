@@ -12,6 +12,7 @@ jobs:
           node-version: 20
           cache: "pnpm"
       - run: corepack enable
+      - run: corepack prepare pnpm@latest --activate  # <-- add this line
       - run: pnpm install
       - run: pnpm lint
       - run: pnpm test
