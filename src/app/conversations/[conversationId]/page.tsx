@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
 import { useConversationUpdates } from "@/hooks/useConversationUpdates";
@@ -14,16 +14,21 @@ interface Message {
 
 export default function ConversationPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ conversationId: string }>;
+  searchParams: Promise<{ initialMessage?: string }>;
 }) {
   const { emitConversationCreated } = useConversationUpdates();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [hasProcessedInitialMessage, setHasProcessedInitialMessage] = useState(false);
   const paramObj = React.use(params);
+  const searchParamsObj = React.use(searchParams);
   const conversationId = paramObj.conversationId;
+  const initialMessage = searchParamsObj.initialMessage;
 
   useEffect(() => {
     async function fetchMessages() {
@@ -49,99 +54,122 @@ export default function ConversationPage({
     fetchMessages();
   }, [conversationId]);
 
-  const sendMessage = async (userMessage: string) => {
-    if (!userMessage.trim() || isLoading) return;
+  const sendMessage = useCallback(
+    async (userMessage: string) => {
+      if (!userMessage.trim() || isLoading) return;
 
-    // Clear input immediately and show user message
-    setInputValue("");
-    setIsLoading(true);
-    setError(null);
+      // Clear input immediately and show user message
+      setInputValue("");
+      setIsLoading(true);
+      setError(null);
 
-    try {
-      // Immediately add user message to UI
-      const tempUserMessage = {
-        id: `temp-user-${Date.now()}`,
-        role: "user" as const,
-        content: userMessage,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, tempUserMessage]);
+      try {
+        // Immediately add user message to UI
+        const tempUserMessage = {
+          id: `temp-user-${Date.now()}`,
+          role: "user" as const,
+          content: userMessage,
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, tempUserMessage]);
 
-      // Add empty AI message for streaming
-      const tempAiMessage = {
-        id: `temp-ai-${Date.now()}`,
-        role: "assistant" as const,
-        content: "",
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, tempAiMessage]);
+        // Add empty AI message for streaming
+        const tempAiMessage = {
+          id: `temp-ai-${Date.now()}`,
+          role: "assistant" as const,
+          content: "",
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, tempAiMessage]);
 
-      // Send to chat endpoint (it will handle saving both messages)
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId: conversationId === "new" ? undefined : conversationId,
-          query: userMessage,
-        }),
-      });
+        // Send to chat endpoint (it will handle saving both messages)
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: conversationId === "new" ? undefined : conversationId,
+            query: userMessage,
+          }),
+        });
 
-      if (!response.ok) throw new Error("Failed to get response");
+        if (!response.ok) throw new Error("Failed to get response");
 
-      // Get conversation ID from response headers (for new conversations)
-      const newConversationId = response.headers.get("X-Conversation-ID");
-      let actualConversationId = conversationId;
+        // Get conversation ID from response headers (for new conversations)
+        const newConversationId = response.headers.get("X-Conversation-ID");
+        let actualConversationId = conversationId;
 
-      if (newConversationId && conversationId === "new") {
-        actualConversationId = newConversationId;
-        // Update URL without page reload
-        window.history.replaceState(null, "", `/conversations/${newConversationId}`);
-      }
-
-      // Stream AI response
-      let aiResponse = "";
-      const reader = response.body?.getReader();
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = new TextDecoder().decode(value);
-          aiResponse += chunk;
-
-          // Update the AI message in real-time for streaming effect
-          setMessages((prev) =>
-            prev.map((msg) => (msg.id === tempAiMessage.id ? { ...msg, content: aiResponse } : msg))
-          );
+        if (newConversationId && conversationId === "new") {
+          actualConversationId = newConversationId;
+          // Update URL without page reload
+          window.history.replaceState(null, "", `/conversations/${newConversationId}`);
         }
-      }
 
-      // After streaming is complete, fetch fresh data from DB to ensure consistency
-      const res = await fetch(`/api/messages/${actualConversationId}`);
-      const data = await res.json();
-      const mapped = data.map((msg: any) => ({
-        id: msg._id || msg.id,
-        role: msg.role,
-        content: msg.content,
-        createdAt: msg.createdAt,
-      }));
-      setMessages(mapped);
+        // Stream AI response
+        let aiResponse = "";
+        const reader = response.body?.getReader();
 
-      // Trigger conversation list refresh if this was a new conversation
-      if (newConversationId && conversationId === "new") {
-        // Emit conversation created event
-        emitConversationCreated(newConversationId);
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = new TextDecoder().decode(value);
+            aiResponse += chunk;
+
+            // Update the AI message in real-time for streaming effect
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === tempAiMessage.id ? { ...msg, content: aiResponse } : msg
+              )
+            );
+          }
+        }
+
+        // After streaming is complete, fetch fresh data from DB to ensure consistency
+        const res = await fetch(`/api/messages/${actualConversationId}`);
+        const data = await res.json();
+        const mapped = data.map((msg: any) => ({
+          id: msg._id || msg.id,
+          role: msg.role,
+          content: msg.content,
+          createdAt: msg.createdAt,
+        }));
+        setMessages(mapped);
+
+        // Trigger conversation list refresh if this was a new conversation
+        if (newConversationId && conversationId === "new") {
+          // Emit conversation created event
+          emitConversationCreated(newConversationId);
+        }
+      } catch (error: any) {
+        console.error("Failed to send message:", error);
+        setError(error.message || "An error occurred");
+        // Remove the optimistic messages on error and restore input
+        setMessages((prev) => prev.filter((msg) => !msg.id.startsWith("temp-")));
+        setInputValue(userMessage);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error: any) {
-      console.error("Failed to send message:", error);
-      setError(error.message || "An error occurred");
-      // Remove the optimistic messages on error and restore input
-      setMessages((prev) => prev.filter((msg) => !msg.id.startsWith("temp-")));
-      setInputValue(userMessage);
-    } finally {
-      setIsLoading(false);
+    },
+    [conversationId, isLoading, emitConversationCreated]
+  );
+
+  // Handle initial message from URL parameter
+  useEffect(() => {
+    if (initialMessage && !hasProcessedInitialMessage && messages.length === 0 && !isLoading) {
+      setHasProcessedInitialMessage(true);
+      // Clear the URL parameter
+      window.history.replaceState(null, "", `/conversations/${conversationId}`);
+      // Send the initial message
+      sendMessage(initialMessage);
     }
-  };
+  }, [
+    initialMessage,
+    hasProcessedInitialMessage,
+    messages.length,
+    isLoading,
+    conversationId,
+    sendMessage,
+  ]);
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
