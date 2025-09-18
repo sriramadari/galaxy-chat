@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from "react";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
-import { useUser } from "@clerk/nextjs";
 import { useConversationUpdates } from "@/hooks/useConversationUpdates";
 
 interface Message {
@@ -18,7 +17,6 @@ export default function ConversationPage({
 }: {
   params: Promise<{ conversationId: string }>;
 }) {
-  const { user } = useUser();
   const { emitConversationCreated } = useConversationUpdates();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -153,11 +151,14 @@ export default function ConversationPage({
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    console.log("herere");
     setInputValue(e.target.value);
   };
 
-  const handleEditMessage = async (messageId: string, newContent: string) => {
+  const handleEditMessage = async (
+    messageId: string,
+    newContent: string,
+    shouldReAsk: boolean = false
+  ) => {
     try {
       setError(null);
       // Update the message in the database
@@ -178,6 +179,14 @@ export default function ConversationPage({
       setMessages((prevMessages) =>
         prevMessages.map((msg) => (msg.id === messageId ? { ...msg, content: newContent } : msg))
       );
+
+      // If shouldReAsk is true, trigger re-ask after updating
+      if (shouldReAsk) {
+        // Wait a bit to ensure the state is updated, then trigger re-ask
+        setTimeout(() => {
+          handleReAskMessage(messageId);
+        }, 100);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to edit message");
     }
@@ -194,62 +203,64 @@ export default function ConversationPage({
         throw new Error("Invalid message to re-ask");
       }
 
-      // Remove all messages after this one (including AI responses)
-      const messageIndex = messages.findIndex((msg) => msg.id === messageId);
-      const messagesToKeep = messages.slice(0, messageIndex + 1);
+      // Use the bulk delete API to remove all messages after this one
+      const response = await fetch(`/api/messages/${conversationId}/delete-after`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ afterMessageId: messageId }),
+      });
 
-      // Delete messages after this one from the database
-      const messagesToDelete = messages.slice(messageIndex + 1);
-      for (const msg of messagesToDelete) {
-        await fetch("/api/messages", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messageId: msg.id }),
-        });
+      if (!response.ok) {
+        throw new Error("Failed to delete subsequent messages");
       }
 
       // Update local state to show only messages up to the re-asked one
+      const messageIndex = messages.findIndex((msg) => msg.id === messageId);
+      const messagesToKeep = messages.slice(0, messageIndex + 1);
       setMessages(messagesToKeep);
 
-      // Send to chat endpoint for a new AI response
-      const response = await fetch("/api/chat", {
+      // Add empty AI message for streaming
+      const tempAiMessage = {
+        id: `temp-ai-${Date.now()}`,
+        role: "assistant" as const,
+        content: "",
+        createdAt: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, tempAiMessage]);
+
+      // Send to chat endpoint for a new AI response with skipUserSave flag
+      const chatResponse = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: messagesToKeep,
           conversationId,
           query: messageToReAsk.content,
+          skipUserSave: true, // Don't save the user message again
         }),
       });
 
-      if (!response.ok) throw new Error("Failed to get response");
+      if (!chatResponse.ok) throw new Error("Failed to get response");
 
-      // Stream AI response
+      // Stream AI response in real-time
       let aiResponse = "";
-      const reader = response.body?.getReader();
+      const reader = chatResponse.body?.getReader();
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          aiResponse += new TextDecoder().decode(value);
+          const chunk = new TextDecoder().decode(value);
+          aiResponse += chunk;
+
+          // Update the AI message in real-time for streaming effect
+          setMessages((prev) =>
+            prev.map((msg) => (msg.id === tempAiMessage.id ? { ...msg, content: aiResponse } : msg))
+          );
         }
       }
 
-      // Save AI message
-      await fetch("/api/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId,
-          userId: user?.id,
-          role: "assistant",
-          content: aiResponse,
-        }),
-      });
-
-      // Refresh messages
-      const res = await fetch(`/api/messages/${conversationId}`);
-      const data = await res.json();
+      // Refresh messages from database to get the final saved state
+      const messagesResponse = await fetch(`/api/messages/${conversationId}`);
+      const data = await messagesResponse.json();
       const mapped = data.map((msg: any) => ({
         id: msg._id || msg.id,
         role: msg.role,

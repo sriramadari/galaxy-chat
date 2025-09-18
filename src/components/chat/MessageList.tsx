@@ -12,7 +12,7 @@ interface Message {
 interface MessageListProps {
   messages: Message[];
   isLoading: boolean;
-  onEditMessage: (_id: string, _content: string) => void;
+  onEditMessage: (_id: string, _content: string, _shouldReAsk?: boolean) => void;
   onReAskMessage?: (_id: string) => void;
 }
 

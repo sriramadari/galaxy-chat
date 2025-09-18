@@ -141,7 +141,7 @@ export default function MessageInput({
           <textarea
             ref={textareaRef}
             className="w-full bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none border-0 focus:outline-none focus:ring-0 px-4 py-4 pr-24 text-[15px] leading-6 min-h-[52px] max-h-40"
-            placeholder="Message ChatGPT..."
+            placeholder="Message Galaxy AI..."
             value={input}
             onChange={handleInputChange}
             disabled={isLoading}
@@ -178,7 +178,7 @@ export default function MessageInput({
 
       <div className="flex justify-center mt-2">
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          ChatGPT can make mistakes. Check important info.
+          Galaxy AI can make mistakes. Check important info.
         </p>
       </div>
     </div>

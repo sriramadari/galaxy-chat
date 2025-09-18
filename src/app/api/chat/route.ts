@@ -18,49 +18,52 @@ export async function POST(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let conversationId;
-  let userMessage;
+  let conversationId: string;
+  let userMessage: string;
   let isNewConversation = false;
 
   try {
     const body = await req.json();
     conversationId = body.conversationId;
     userMessage = body.query; // The current user message to process
+    const skipUserSave = body.skipUserSave; // Flag to skip saving user message (for re-ask scenarios)
+
+    // Check if this is a new conversation (no conversationId provided)
+    if (!conversationId) {
+      isNewConversation = true;
+      // Create new conversation
+      const newConversation = new Conversation({
+        userId,
+        title: "New Conversation",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const savedConversation = await newConversation.save();
+      conversationId = (savedConversation._id as any).toString();
+    }
+
+    // Save the current user message (don't duplicate existing ones)
+    // Only save if this is a genuinely new message and not a re-ask
+    if (!skipUserSave) {
+      const existingMessage = await Message.findOne({
+        conversationId,
+        userId,
+        role: "user",
+        content: userMessage,
+        createdAt: { $gte: new Date(Date.now() - 5000) }, // Within last 5 seconds
+      });
+
+      if (!existingMessage) {
+        await Message.create({
+          conversationId,
+          userId,
+          role: "user",
+          content: userMessage,
+        });
+      }
+    }
   } catch {
     return Response.json({ error: "Invalid request format" }, { status: 400 });
-  }
-
-  // Check if this is a new conversation (no conversationId provided)
-  if (!conversationId) {
-    isNewConversation = true;
-    // Create new conversation
-    const newConversation = new Conversation({
-      userId,
-      title: "New Conversation",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    const savedConversation = await newConversation.save();
-    conversationId = (savedConversation._id as any).toString();
-  }
-
-  // Save the current user message (don't duplicate existing ones)
-  // Only save if this is a genuinely new message
-  const existingMessage = await Message.findOne({
-    conversationId,
-    userId,
-    role: "user",
-    content: userMessage,
-    createdAt: { $gte: new Date(Date.now() - 5000) }, // Within last 5 seconds
-  });
-
-  if (!existingMessage) {
-    await Message.create({
-      conversationId,
-      userId,
-      role: "user",
-      content: userMessage,
-    });
   }
 
   await addMemories([{ role: "user", content: [{ type: "text", text: userMessage }] }], {

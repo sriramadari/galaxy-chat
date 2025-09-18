@@ -14,7 +14,7 @@ interface Message {
 
 interface MessageItemProps {
   message: Message;
-  onEdit: (_id: string, _content: string) => void;
+  onEdit: (_id: string, _content: string, _shouldReAsk?: boolean) => void;
   onReAsk?: (_id: string) => void;
   isStreaming?: boolean;
 }
@@ -113,7 +113,8 @@ export default function MessageItem({ message, onEdit, onReAsk, isStreaming }: M
 
   const handleSave = () => {
     if (editedContent.trim() !== message.content.trim()) {
-      onEdit(message.id, editedContent.trim());
+      // Call onEdit with shouldReAsk=true to trigger re-ask after editing
+      onEdit(message.id, editedContent.trim(), true);
     }
     setIsEditing(false);
   };
