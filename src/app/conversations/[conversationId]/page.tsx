@@ -153,6 +153,7 @@ export default function ConversationPage({
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    console.log("herere");
     setInputValue(e.target.value);
   };
 

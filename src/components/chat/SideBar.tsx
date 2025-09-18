@@ -150,52 +150,43 @@ export default function Sidebar({
             {conversations?.map((conversation) => (
               <div
                 key={conversation._id}
-                className={`p-3 rounded-lg cursor-pointer group relative transition-colors ${
+                className={`p-2 rounded-lg cursor-pointer group relative transition-colors ${
                   activeId === conversation._id
                     ? "bg-blue-100 dark:bg-blue-900/50 border border-blue-200 dark:border-blue-800"
                     : "hover:bg-gray-100 dark:hover:bg-gray-800"
                 }`}
                 onClick={() => editingId !== conversation._id && handleSelect(conversation._id)}
               >
-                <div className="pr-20">
+                <div className="pr-12">
                   {editingId === conversation._id ? (
                     <input
                       type="text"
                       value={editingTitle}
                       onChange={(e) => setEditingTitle(e.target.value)}
                       onKeyDown={(e) => handleTitleKeyDown(e, conversation._id)}
-                      className="w-full bg-transparent border-b border-blue-300 dark:border-blue-600 outline-none text-sm font-medium text-gray-900 dark:text-gray-100"
+                      className="w-full bg-transparent border-b border-blue-300 dark:border-blue-600 outline-none text-xs font-medium text-gray-900 dark:text-gray-100"
                       autoFocus
                       disabled={isUpdating}
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : (
-                    <h3
-                      className={`font-medium truncate ${
+                    <h4
+                      className={`font-medium text-xs truncate ${
                         activeId === conversation._id
                           ? "text-blue-900 dark:text-blue-100"
                           : "text-gray-900 dark:text-gray-100"
                       }`}
                     >
                       {conversation.title}
-                    </h3>
+                    </h4>
                   )}
-                  <span
-                    className={`text-xs mt-1 block ${
-                      activeId === conversation._id
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-gray-400"
-                    }`}
-                  >
-                    {new Date(conversation.updatedAt).toLocaleString()}
-                  </span>
                 </div>
 
-                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center space-x-1">
+                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center space-x-0.5">
                   {editingId === conversation._id ? (
                     <>
                       <button
-                        className="p-1.5 rounded-full hover:bg-green-100 dark:hover:bg-green-900/30 transition-all duration-200"
+                        className="p-1 rounded-full hover:bg-green-100 dark:hover:bg-green-900/30 transition-all duration-200"
                         onClick={(e) => saveTitle(e, conversation._id)}
                         title="Save title"
                         disabled={isUpdating}
@@ -203,7 +194,7 @@ export default function Sidebar({
                         <Check className="h-3 w-3 text-green-600" />
                       </button>
                       <button
-                        className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200"
+                        className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200"
                         onClick={(e) => {
                           e.stopPropagation();
                           cancelEditing();
@@ -217,14 +208,14 @@ export default function Sidebar({
                   ) : (
                     <>
                       <button
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all duration-200"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all duration-200"
                         onClick={(e) => startEditing(e, conversation)}
                         title="Edit title"
                       >
                         <Edit2 className="h-3 w-3 text-blue-500" />
                       </button>
                       <button
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 transition-all duration-200"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 transition-all duration-200"
                         onClick={(e) => handleDelete(e, conversation._id)}
                         title="Delete conversation"
                       >

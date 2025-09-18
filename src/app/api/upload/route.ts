@@ -1,7 +1,7 @@
 import { google } from "@ai-sdk/google";
 import { streamText } from "ai";
 import { auth } from "@clerk/nextjs/server";
-import { storeConversation, retrieveConversation, searchMemory } from "@/lib/memory";
+import { storeConversation, retrieveConversation, searchMemory } from "@/lib/memory-fallback";
 
 // Allow streaming responses up to 30 seconds
 export const maxDuration = 30;

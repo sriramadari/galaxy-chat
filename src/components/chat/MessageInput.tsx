@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Upload, SendHorizontal, X } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { SendHorizontal, X, Paperclip } from "lucide-react";
 import FileUpload from "../upload/FileUpload";
 
 interface MessageInputProps {
@@ -25,6 +25,18 @@ export default function MessageInput({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = "auto";
+      const scrollHeight = textarea.scrollHeight;
+      const maxHeight = 160; // 10 lines approximately
+      textarea.style.height = Math.min(scrollHeight, maxHeight) + "px";
+    }
+  }, [input]);
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
@@ -91,12 +103,12 @@ export default function MessageInput({
   return (
     <div className="w-full">
       {showUpload && (
-        <div className="mb-4 p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800">
+        <div className="mb-4 p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50/50 dark:bg-gray-800/50">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Upload File</h3>
+            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Attach File</h3>
             <button
               onClick={() => setShowUpload(false)}
-              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+              className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
             >
               <X size={16} className="text-gray-500 dark:text-gray-400" />
             </button>
@@ -111,27 +123,27 @@ export default function MessageInput({
             <button
               onClick={handleUpload}
               disabled={isUploading}
-              className="mt-3 w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="mt-3 w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
             >
               {isUploading ? "Uploading..." : "Upload File"}
             </button>
           )}
           {uploadedFileUrl && (
-            <div className="mt-3 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded text-green-700 dark:text-green-300 text-sm">
+            <div className="mt-3 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-green-700 dark:text-green-300 text-sm">
               ✓ File uploaded successfully
             </div>
           )}
         </div>
       )}
 
-      <form onSubmit={handleFormSubmit} className="flex items-end space-x-2">
-        <div className="flex-1 relative">
+      <form onSubmit={handleFormSubmit}>
+        <div className="relative bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-2xl shadow-sm hover:border-gray-400 dark:hover:border-gray-500 focus-within:border-blue-500 dark:focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-500 dark:focus-within:ring-blue-400 transition-all duration-200">
           <textarea
-            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-3 pr-12 resize-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[54px] max-h-[160px]"
-            placeholder="Message Galaxy AI..."
+            ref={textareaRef}
+            className="w-full bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none border-0 focus:outline-none focus:ring-0 px-4 py-4 pr-24 text-[15px] leading-6 min-h-[52px] max-h-40"
+            placeholder="Message ChatGPT..."
             value={input}
             onChange={handleInputChange}
-            rows={1}
             disabled={isLoading}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -142,23 +154,33 @@ export default function MessageInput({
               }
             }}
           />
-          <button
-            type="button"
-            onClick={() => setShowUpload(!showUpload)}
-            className="absolute right-2 bottom-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-            disabled={isLoading}
-          >
-            <Upload className="h-5 w-5" />
-          </button>
+
+          <div className="absolute bottom-3 right-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowUpload(!showUpload)}
+              className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              disabled={isLoading}
+              title="Attach file"
+            >
+              <Paperclip className="h-4 w-4" />
+            </button>
+            <button
+              type="submit"
+              className="p-1.5 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-400 hover:bg-blue-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-200 disabled:hover:text-gray-400 dark:disabled:hover:bg-gray-700 transition-all duration-200 shadow-sm"
+              disabled={isLoading || (!input.trim() && !uploadedFileUrl)}
+            >
+              <SendHorizontal className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-        <button
-          type="submit"
-          className="p-3 rounded-lg bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 flex-shrink-0"
-          disabled={isLoading || (!input.trim() && !uploadedFileUrl)}
-        >
-          <SendHorizontal className="h-5 w-5" />
-        </button>
       </form>
+
+      <div className="flex justify-center mt-2">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          ChatGPT can make mistakes. Check important info.
+        </p>
+      </div>
     </div>
   );
 }

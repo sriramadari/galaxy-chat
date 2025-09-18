@@ -58,6 +58,31 @@ export default function ChatContainer({
     initConversation();
   }, [conversationId, user]);
 
+  // Load messages when conversation changes
+  useEffect(() => {
+    async function loadMessages() {
+      if (conversationId) {
+        try {
+          const response = await fetch(`/api/messages/${conversationId}`);
+          if (response.ok) {
+            const messagesData = await response.json();
+            const formattedMessages: Message[] = messagesData.map((msg: any) => ({
+              id: msg._id,
+              role: msg.role,
+              content: msg.content,
+            }));
+            setMessages(formattedMessages);
+          }
+        } catch (error) {
+          console.error("Error loading messages:", error);
+        }
+      } else {
+        setMessages([]);
+      }
+    }
+    loadMessages();
+  }, [conversationId]);
+
   // Scroll to bottom when messages change
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -67,18 +92,25 @@ export default function ChatContainer({
 
   const sendMessage = async (userMessage: string) => {
     if (!userMessage.trim() || isLoading || !conversationId) return;
+
+    // Set loading immediately
+    setIsLoading(true);
+    setError(null);
+
     const messageId = uuidv4();
     const newUserMessage: Message = {
       id: messageId,
       role: "user",
       content: userMessage,
     };
-    setMessages((prev) => [...prev, newUserMessage]);
-    setIsLoading(true);
-    setError(null);
+
+    // Update UI immediately with user message
+    const updatedMessages = [...messages, newUserMessage];
+    setMessages(updatedMessages);
+
     try {
-      // Save message to DB
-      await fetch("/api/messages", {
+      // Save message to DB (async, don't wait)
+      fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -87,57 +119,14 @@ export default function ChatContainer({
           role: "user",
           content: userMessage,
         }),
-      });
-      // Send API request to chat endpoint
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [...messages, newUserMessage],
-          conversationId,
-          query: userMessage,
-        }),
-      });
-      if (!response.ok) throw new Error("Failed to get response");
+      }).catch((err) => console.error("Error saving user message:", err));
 
-      // Process the streaming response
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("Response body is empty");
-
-      // Create a temporary buffer for the AI response
-      let aiResponseBuffer = "";
-      const aiResponseId = Date.now().toString() + "1"; // Unique ID
-
-      // Add an empty AI message that will be updated
-      setMessages((prev) => [...prev, { id: aiResponseId, role: "assistant", content: "" }]);
-
-      // Process the stream chunks
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        // Decode the chunk and add to buffer
-        const chunk = new TextDecoder().decode(value);
-        aiResponseBuffer += chunk;
-
-        // Update the AI message with the accumulated text
-        setMessages((prev) => {
-          // Find and update the last AI message
-          const updated = [...prev];
-          const aiMessageIndex = updated.length - 1;
-          if (updated[aiMessageIndex]?.role === "assistant") {
-            updated[aiMessageIndex] = {
-              ...updated[aiMessageIndex],
-              content: aiResponseBuffer,
-            };
-          }
-          return updated;
-        });
-      }
+      // Generate AI response immediately
+      await generateAIResponse(userMessage, updatedMessages);
     } catch (err: any) {
-      setError(err.message || "An error occurred");
-    } finally {
-      setIsLoading(false);
+      setError(err.message || "Failed to send message");
+      // Remove the user message if saving failed
+      setMessages(messages);
     }
   };
 
@@ -156,33 +145,192 @@ export default function ChatContainer({
   const handleEditMessage = async (id: string, content: string) => {
     const index = messages.findIndex((m) => m.id === id);
     if (index === -1 || messages[index].role !== "user") return;
+
+    // Remove all messages after the edited message (including AI responses)
     const updatedMessages = [...messages.slice(0, index + 1)];
     updatedMessages[index] = { ...updatedMessages[index], content };
     setMessages(updatedMessages);
-    // Update message in DB
-    await fetch("/api/messages", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, content }),
-    });
-    // Re-ask for response
-    sendMessage(content);
+
+    try {
+      // Update message in DB instead of creating a new one
+      await fetch(`/api/messages/${conversationId}/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+
+      // Delete subsequent messages from the database using bulk delete
+      await fetch(`/api/messages/${conversationId}/delete-after`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ afterMessageId: id }),
+      });
+
+      // Set loading state for re-generation
+      setIsLoading(true);
+
+      // Re-generate AI response with the new content
+      await generateAIResponse(content, updatedMessages);
+    } catch (error) {
+      console.error("Error updating message:", error);
+      setError("Failed to update message");
+      setIsLoading(false);
+    }
+  };
+
+  const handleReAskMessage = async (id: string) => {
+    const messageIndex = messages.findIndex((m) => m.id === id);
+
+    if (messageIndex === -1 || messages[messageIndex].role !== "user") {
+      return;
+    }
+
+    const userMessage = messages[messageIndex];
+
+    // Remove all messages after this one (including subsequent AI responses)
+    const updatedMessages = [...messages.slice(0, messageIndex + 1)];
+
+    // Update the messages state immediately to show the loading state
+    setMessages(updatedMessages);
+
+    // Clear any existing errors
+    setError(null);
+
+    try {
+      // Delete subsequent messages from the database using bulk delete
+      await fetch(`/api/messages/${conversationId}/delete-after`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ afterMessageId: id }),
+      });
+
+      // Set loading state for re-generation
+      setIsLoading(true);
+
+      // Re-generate AI response
+      console.log("regerenrating");
+      await generateAIResponse(userMessage.content, updatedMessages);
+    } catch (error) {
+      console.error("Error in re-ask:", error);
+      setError("Failed to re-ask message");
+      setIsLoading(false);
+    }
+  };
+
+  const generateAIResponse = async (userContent: string, currentMessages: Message[]) => {
+    if (!conversationId) return;
+
+    // isLoading is already set in sendMessage, don't set it again here
+    setError(null);
+
+    try {
+      // Send API request to chat endpoint
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: currentMessages,
+          conversationId,
+          query: userContent,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get response: ${response.status} ${errorText}`);
+      }
+
+      // Process the streaming response with simplified approach
+      const reader = response.body?.getReader();
+      console.log(reader);
+      if (!reader) throw new Error("Response body is empty");
+
+      // Create a unique ID for the AI response
+      const aiResponseId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      let aiResponseBuffer = "";
+
+      // Add an empty AI message that will be updated during streaming
+      setMessages((prev) => [...prev, { id: aiResponseId, role: "assistant", content: "" }]);
+
+      // Simple streaming with immediate updates
+      const decoder = new TextDecoder();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // Decode the chunk and add to buffer
+          const chunk = decoder.decode(value, { stream: true });
+          aiResponseBuffer += chunk;
+
+          // Update the UI immediately with the complete buffer
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === aiResponseId ? { ...msg, content: aiResponseBuffer } : msg
+            )
+          );
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      // Save the complete AI response to the database
+      if (aiResponseBuffer.trim()) {
+        await fetch("/api/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId,
+            userId: user?.id,
+            role: "assistant",
+            content: aiResponseBuffer.trim(),
+          }),
+        });
+        console.log("saved");
+      }
+    } catch (err: any) {
+      console.error("AI Response Error:", err);
+      setError(err.message || "An error occurred while generating the response");
+
+      // Remove any partial AI response that might have been added
+      setMessages((prev) => {
+        const lastMessage = prev[prev.length - 1];
+        if (lastMessage && lastMessage.role === "assistant" && !lastMessage.content.trim()) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="flex flex-col h-full max-w-3xl mx-auto">
-      <div className="flex-grow overflow-auto p-4">
-        <MessageList messages={messages} isLoading={isLoading} onEditMessage={handleEditMessage} />
+    <div className="flex flex-col h-full bg-white dark:bg-gray-900">
+      <div className="flex-1 overflow-y-auto">
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          onEditMessage={handleEditMessage}
+          onReAskMessage={handleReAskMessage}
+        />
         <div ref={messagesEndRef} />
       </div>
-      <div className="border-t border-gray-200 p-4">
-        <MessageInput
-          input={inputValue}
-          handleInputChange={handleInputChange}
-          handleSubmit={handleSubmit}
-          isLoading={isLoading}
-        />
-        {error && <div className="text-red-500 text-sm mt-2">{error}</div>}
+      <div className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
+        <div className="max-w-3xl mx-auto">
+          <MessageInput
+            input={inputValue}
+            handleInputChange={handleInputChange}
+            handleSubmit={handleSubmit}
+            isLoading={isLoading}
+          />
+          {error && (
+            <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+              {error}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

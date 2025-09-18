@@ -45,12 +45,23 @@ export async function POST(req: Request) {
   }
 
   // Save the current user message (don't duplicate existing ones)
-  await Message.create({
+  // Only save if this is a genuinely new message
+  const existingMessage = await Message.findOne({
     conversationId,
     userId,
     role: "user",
     content: userMessage,
+    createdAt: { $gte: new Date(Date.now() - 5000) }, // Within last 5 seconds
   });
+
+  if (!existingMessage) {
+    await Message.create({
+      conversationId,
+      userId,
+      role: "user",
+      content: userMessage,
+    });
+  }
 
   await addMemories([{ role: "user", content: [{ type: "text", text: userMessage }] }], {
     user_id: userId,
@@ -100,7 +111,7 @@ Remember: You can help with coding, explanations, problem-solving, creative task
       try {
         for await (const chunk of result.textStream) {
           aiReply += chunk;
-          // Send chunk to client
+          // Send chunk to client immediately
           controller.enqueue(new TextEncoder().encode(chunk));
         }
 
@@ -160,11 +171,14 @@ Remember: You can help with coding, explanations, problem-solving, creative task
     },
   });
 
-  // Return streaming response to client
+  // Return streaming response to client with proper headers for streaming
   return new Response(stream, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
       "X-Conversation-ID": conversationId,
+      "Transfer-Encoding": "chunked",
     },
   });
 }

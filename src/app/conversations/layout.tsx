@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useUser, UserButton } from "@clerk/nextjs";
+import { useUser, SignInButton, UserButton } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";
 import { Sun, Moon, Menu } from "lucide-react";
 import { useDarkMode } from "@/hooks/useDarkMode";
@@ -21,7 +21,8 @@ export default function ConversationsLayout({ children }: { children: React.Reac
 function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
   const [conversations, setConversations] = useState<any[]>([]);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const { user } = useUser();
+  const [isLoading, setIsLoading] = useState(false);
+  const { user, isLoaded } = useUser();
   const router = useRouter();
   const pathname = usePathname();
   const { isDarkMode, toggleDarkMode } = useDarkMode();
@@ -29,10 +30,16 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
   const { showToast } = useToast();
 
   // Extract conversation ID from pathname
-  const activeId = pathname.split("/").pop() === "conversations" ? null : pathname.split("/").pop();
+  const activeId =
+    pathname === "/conversations"
+      ? null
+      : pathname === "/conversations/new"
+        ? "new"
+        : pathname.split("/").pop();
 
   const fetchConversations = async () => {
     if (!user) return;
+    setIsLoading(true);
     try {
       const res = await fetch("/api/conversations");
       if (res.ok) {
@@ -41,11 +48,15 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
       }
     } catch (error) {
       console.error("Failed to fetch conversations:", error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchConversations();
+    if (user) {
+      fetchConversations();
+    }
   }, [user]);
 
   // Listen for conversation updates
@@ -82,8 +93,6 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
   const createNewConversation = async () => {
     if (!user) return;
     try {
-      // For immediate new conversation, we'll just navigate to /conversations/new
-      // The actual conversation will be created when the first message is sent
       router.push(`/conversations/new`);
       // Close mobile sidebar after creating new conversation
       if (isMobileOpen) {
@@ -93,11 +102,6 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
       console.error("Failed to create conversation:", error);
     }
   };
-
-  // Function to refresh conversations (can be called when a new conversation is created)
-  // const refreshConversations = async () => {
-  //   await fetchConversations();
-  // };
 
   const handleUpdateTitle = async (id: string, title: string): Promise<boolean> => {
     try {
@@ -152,6 +156,32 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
   const handleMobileToggle = () => {
     setIsMobileOpen(!isMobileOpen);
   };
+
+  // Show loading state
+  if (!isLoaded) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent"></div>
+      </div>
+    );
+  }
+
+  // Show sign in if not authenticated
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
+        <h1 className="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">
+          Welcome to Galaxy Chat
+        </h1>
+        <p className="mb-6 text-gray-600 dark:text-gray-400">Please sign in to continue</p>
+        <SignInButton mode="modal">
+          <button className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors">
+            Sign In
+          </button>
+        </SignInButton>
+      </div>
+    );
+  }
 
   return (
     <ErrorBoundary>
@@ -215,6 +245,7 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
           onUpdateTitle={handleUpdateTitle}
           isMobileOpen={isMobileOpen}
           onMobileToggle={handleMobileToggle}
+          isLoading={isLoading}
         />
 
         <main className="flex-1 h-full md:ml-64 pt-14">
