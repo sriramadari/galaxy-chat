@@ -43,7 +43,6 @@ export async function POST(request: NextRequest) {
     const conversation = await Conversation.create({
       title: title || "New Conversation",
       userId,
-      messages: [],
     });
 
     return Response.json(conversation);

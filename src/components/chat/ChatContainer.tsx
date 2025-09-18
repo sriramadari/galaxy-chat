@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import { useUser } from "@clerk/nextjs";
+import { v4 as uuidv4 } from "uuid";
 
 // Define a basic message type
 interface Message {
@@ -16,14 +17,46 @@ interface ChatContainerProps {
   conversationId: string;
 }
 
-export default function ChatContainer({ conversationId }: ChatContainerProps) {
-  // Using useUser hook for auth context without destructuring to avoid unused vars
-  useUser();
+export default function ChatContainer({
+  conversationId: initialConversationId,
+}: ChatContainerProps) {
+  const { user } = useUser();
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string>(initialConversationId || "");
+
+  // On mount, create a new conversation if none exists
+  useEffect(() => {
+    async function initConversation() {
+      if (!conversationId && user) {
+        // Create new conversation in DB
+        const resp = await fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user.id,
+            title: `Chat with ${user.firstName || user.username}`,
+          }),
+        });
+        const data = await resp.json();
+        setConversationId(data._id);
+        // Feed user info to memory
+        await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: `My name is ${user.firstName || user.username}` }],
+            conversationId: data._id,
+            query: `My name is ${user.firstName || user.username}`,
+          }),
+        });
+      }
+    }
+    initConversation();
+  }, [conversationId, user]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -33,38 +66,39 @@ export default function ChatContainer({ conversationId }: ChatContainerProps) {
   }, [messages]);
 
   const sendMessage = async (userMessage: string) => {
-    if (!userMessage.trim() || isLoading) return;
-
-    // Create a new message ID
-    const messageId = Date.now().toString();
-
-    // Add user message to state
+    if (!userMessage.trim() || isLoading || !conversationId) return;
+    const messageId = uuidv4();
     const newUserMessage: Message = {
       id: messageId,
       role: "user",
       content: userMessage,
     };
-
     setMessages((prev) => [...prev, newUserMessage]);
     setIsLoading(true);
     setError(null);
-
     try {
-      // Send API request to our chat endpoint
-      const response = await fetch("/api/chat", {
+      // Save message to DB
+      await fetch("/api/messages", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, newUserMessage],
-          conversationId, // Include the conversation ID
+          conversationId,
+          userId: user?.id,
+          role: "user",
+          content: userMessage,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to get response");
-      }
+      // Send API request to chat endpoint
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [...messages, newUserMessage],
+          conversationId,
+          query: userMessage,
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to get response");
 
       // Process the streaming response
       const reader = response.body?.getReader();
@@ -119,26 +153,20 @@ export default function ChatContainer({ conversationId }: ChatContainerProps) {
     setInputValue(e.target.value);
   };
 
-  const handleEditMessage = (id: string, content: string) => {
-    // Find the message to edit
+  const handleEditMessage = async (id: string, content: string) => {
     const index = messages.findIndex((m) => m.id === id);
-    if (index === -1) return;
-
-    // Only allow editing user messages
-    if (messages[index].role !== "user") return;
-
-    // Update the message
+    if (index === -1 || messages[index].role !== "user") return;
     const updatedMessages = [...messages.slice(0, index + 1)];
-    updatedMessages[index] = {
-      ...updatedMessages[index],
-      content,
-    };
-
-    // Set the updated messages
+    updatedMessages[index] = { ...updatedMessages[index], content };
     setMessages(updatedMessages);
-
-    // Generate new response based on edited message
-    sendMessage("Please respond to my edited message above");
+    // Update message in DB
+    await fetch("/api/messages", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, content }),
+    });
+    // Re-ask for response
+    sendMessage(content);
   };
 
   return (

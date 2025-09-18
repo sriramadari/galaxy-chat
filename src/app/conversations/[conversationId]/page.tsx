@@ -1,0 +1,292 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
+import MessageList from "@/components/chat/MessageList";
+import MessageInput from "@/components/chat/MessageInput";
+import { useUser } from "@clerk/nextjs";
+import { useConversationUpdates } from "@/hooks/useConversationUpdates";
+
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
+export default function ConversationPage({
+  params,
+}: {
+  params: Promise<{ conversationId: string }>;
+}) {
+  const { user } = useUser();
+  const { emitConversationCreated } = useConversationUpdates();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const paramObj = React.use(params);
+  const conversationId = paramObj.conversationId;
+
+  useEffect(() => {
+    async function fetchMessages() {
+      setIsLoading(true);
+      try {
+        const res = await fetch(`/api/messages/${conversationId}`);
+        const data = await res.json();
+        // Map _id to id for MessageList compatibility
+        const mapped = data.map((msg: any) => ({
+          id: msg._id || msg.id,
+          role: msg.role,
+          content: msg.content,
+          createdAt: msg.createdAt,
+        }));
+        setMessages(mapped);
+      } catch (error: any) {
+        console.error("Failed to load messages:", error);
+        setError("Failed to load messages");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchMessages();
+  }, [conversationId]);
+
+  const sendMessage = async (userMessage: string) => {
+    if (!userMessage.trim() || isLoading) return;
+
+    // Clear input immediately and show user message
+    setInputValue("");
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Immediately add user message to UI
+      const tempUserMessage = {
+        id: `temp-user-${Date.now()}`,
+        role: "user" as const,
+        content: userMessage,
+        createdAt: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, tempUserMessage]);
+
+      // Add empty AI message for streaming
+      const tempAiMessage = {
+        id: `temp-ai-${Date.now()}`,
+        role: "assistant" as const,
+        content: "",
+        createdAt: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, tempAiMessage]);
+
+      // Send to chat endpoint (it will handle saving both messages)
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: conversationId === "new" ? undefined : conversationId,
+          query: userMessage,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to get response");
+
+      // Get conversation ID from response headers (for new conversations)
+      const newConversationId = response.headers.get("X-Conversation-ID");
+      let actualConversationId = conversationId;
+
+      if (newConversationId && conversationId === "new") {
+        actualConversationId = newConversationId;
+        // Update URL without page reload
+        window.history.replaceState(null, "", `/conversations/${newConversationId}`);
+      }
+
+      // Stream AI response
+      let aiResponse = "";
+      const reader = response.body?.getReader();
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          aiResponse += chunk;
+
+          // Update the AI message in real-time for streaming effect
+          setMessages((prev) =>
+            prev.map((msg) => (msg.id === tempAiMessage.id ? { ...msg, content: aiResponse } : msg))
+          );
+        }
+      }
+
+      // After streaming is complete, fetch fresh data from DB to ensure consistency
+      const res = await fetch(`/api/messages/${actualConversationId}`);
+      const data = await res.json();
+      const mapped = data.map((msg: any) => ({
+        id: msg._id || msg.id,
+        role: msg.role,
+        content: msg.content,
+        createdAt: msg.createdAt,
+      }));
+      setMessages(mapped);
+
+      // Trigger conversation list refresh if this was a new conversation
+      if (newConversationId && conversationId === "new") {
+        // Emit conversation created event
+        emitConversationCreated(newConversationId);
+      }
+    } catch (error: any) {
+      console.error("Failed to send message:", error);
+      setError(error.message || "An error occurred");
+      // Remove the optimistic messages on error and restore input
+      setMessages((prev) => prev.filter((msg) => !msg.id.startsWith("temp-")));
+      setInputValue(userMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (inputValue.trim()) {
+      sendMessage(inputValue);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value);
+  };
+
+  const handleEditMessage = async (messageId: string, newContent: string) => {
+    try {
+      setError(null);
+      // Update the message in the database
+      const response = await fetch("/api/messages", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messageId,
+          content: newContent,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update message");
+      }
+
+      // Update the local state
+      setMessages((prevMessages) =>
+        prevMessages.map((msg) => (msg.id === messageId ? { ...msg, content: newContent } : msg))
+      );
+    } catch (err: any) {
+      setError(err.message || "Failed to edit message");
+    }
+  };
+
+  const handleReAskMessage = async (messageId: string) => {
+    try {
+      setError(null);
+      setIsLoading(true);
+
+      // Find the user message that we want to re-ask
+      const messageToReAsk = messages.find((msg) => msg.id === messageId);
+      if (!messageToReAsk || messageToReAsk.role !== "user") {
+        throw new Error("Invalid message to re-ask");
+      }
+
+      // Remove all messages after this one (including AI responses)
+      const messageIndex = messages.findIndex((msg) => msg.id === messageId);
+      const messagesToKeep = messages.slice(0, messageIndex + 1);
+
+      // Delete messages after this one from the database
+      const messagesToDelete = messages.slice(messageIndex + 1);
+      for (const msg of messagesToDelete) {
+        await fetch("/api/messages", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messageId: msg.id }),
+        });
+      }
+
+      // Update local state to show only messages up to the re-asked one
+      setMessages(messagesToKeep);
+
+      // Send to chat endpoint for a new AI response
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: messagesToKeep,
+          conversationId,
+          query: messageToReAsk.content,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to get response");
+
+      // Stream AI response
+      let aiResponse = "";
+      const reader = response.body?.getReader();
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          aiResponse += new TextDecoder().decode(value);
+        }
+      }
+
+      // Save AI message
+      await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId,
+          userId: user?.id,
+          role: "assistant",
+          content: aiResponse,
+        }),
+      });
+
+      // Refresh messages
+      const res = await fetch(`/api/messages/${conversationId}`);
+      const data = await res.json();
+      const mapped = data.map((msg: any) => ({
+        id: msg._id || msg.id,
+        role: msg.role,
+        content: msg.content,
+        createdAt: msg.createdAt,
+      }));
+      setMessages(mapped);
+    } catch (err: any) {
+      setError(err.message || "Failed to re-ask message");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto">
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          onEditMessage={handleEditMessage}
+          onReAskMessage={handleReAskMessage}
+        />
+      </div>
+
+      {/* Input area */}
+      <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-900">
+        <div className="max-w-4xl mx-auto">
+          <MessageInput
+            input={inputValue}
+            handleInputChange={handleInputChange}
+            handleSubmit={handleSubmit}
+            isLoading={isLoading}
+          />
+          {error && <div className="text-red-500 text-sm mt-2 text-center">{error}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}

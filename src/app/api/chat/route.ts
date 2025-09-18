@@ -1,91 +1,170 @@
-import { google } from "@ai-sdk/google";
-import { streamText } from "ai";
 import { auth } from "@clerk/nextjs/server";
-import { storeConversation, retrieveConversation, searchMemory } from "@/lib/memory";
+import { streamText } from "ai";
+import { createMem0, addMemories, retrieveMemories } from "@mem0/vercel-ai-provider";
+import dbConnect from "@/lib/db";
+import Conversation from "@/models/conversation";
+import Message from "@/models/message";
 
-// Allow streaming responses up to 30 seconds
-export const maxDuration = 30;
+const mem0 = createMem0({
+  provider: "google",
+  mem0ApiKey: process.env.MEM0_API_KEY,
+  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+});
 
 export async function POST(req: Request) {
-  // Check authentication
+  await dbConnect();
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  let conversationId;
+  let userMessage;
+  let isNewConversation = false;
+
   try {
-    // Get messages and conversation ID from the request
-    const { messages, conversationId, query } = await req.json();
-
-    if (!messages || !Array.isArray(messages)) {
-      return Response.json({ error: "Invalid messages format" }, { status: 400 });
-    }
-
-    // Retrieve past conversation context if conversationId is provided
-    let contextualMemories: any[] = [];
-    if (conversationId) {
-      contextualMemories = await retrieveConversation(userId, conversationId);
-    }
-
-    // If there's a specific query, search for relevant memories
-    let relevantMemories: any[] = [];
-    if (query) {
-      const searchResults = await searchMemory(userId, query);
-      // Convert search results to the format we need
-      relevantMemories = Array.isArray(searchResults) ? searchResults : searchResults || [];
-    }
-
-    // Build system message with contextual information
-    const systemMessage = {
-      role: "system",
-      content: `You are a helpful assistant named Galaxy AI. Today is ${new Date().toLocaleDateString()}.`,
-    };
-
-    // Add relevant memories as context if found
-    if (relevantMemories && relevantMemories.length > 0) {
-      // Extract text content from memory results
-      const memoryTexts = relevantMemories.map((mem: any) => {
-        // Handle different memory result formats
-        const content =
-          mem.text ||
-          mem.content ||
-          (mem.message ? mem.message.content : null) ||
-          JSON.stringify(mem);
-        return `- ${content}`;
-      });
-
-      systemMessage.content += `\n\nRelevant information from previous conversations:\n${memoryTexts.join("\n")}`;
-    }
-
-    // Combine everything for the model
-    const messagesWithContext = [systemMessage, ...contextualMemories, ...messages];
-
-    // Use Vercel AI SDK streamText for chat
-    const result = await streamText({
-      model: google("gemini-2.5-flash"),
-      messages: messagesWithContext,
-      temperature: 0.7,
-    });
-
-    // Store the updated conversation (do this asynchronously)
-    if (userId && conversationId) {
-      // We can't await the complete text here as it would block the response
-      // Instead, we store the messages we sent to the API
-      // Use Promise.resolve to handle this asynchronously without awaiting
-      Promise.resolve(storeConversation(userId, conversationId, messages)).catch((err) =>
-        console.error("Error storing conversation:", err)
-      );
-    }
-
-    // Return streaming response
-    return result.toTextStreamResponse();
-  } catch (error: any) {
-    console.error("Error generating response:", error);
-
-    // Always return a Response object, even in error cases
-    return Response.json(
-      { error: error.message || "Failed to generate response" },
-      { status: 500 }
-    );
+    const body = await req.json();
+    conversationId = body.conversationId;
+    userMessage = body.query; // The current user message to process
+  } catch {
+    return Response.json({ error: "Invalid request format" }, { status: 400 });
   }
+
+  // Check if this is a new conversation (no conversationId provided)
+  if (!conversationId) {
+    isNewConversation = true;
+    // Create new conversation
+    const newConversation = new Conversation({
+      userId,
+      title: "New Conversation",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const savedConversation = await newConversation.save();
+    conversationId = (savedConversation._id as any).toString();
+  }
+
+  // Save the current user message (don't duplicate existing ones)
+  await Message.create({
+    conversationId,
+    userId,
+    role: "user",
+    content: userMessage,
+  });
+
+  await addMemories([{ role: "user", content: [{ type: "text", text: userMessage }] }], {
+    user_id: userId,
+  });
+
+  // Retrieve context from Mem0
+  const memoryContext = await retrieveMemories("Current conversation context", { user_id: userId });
+
+  // Get all messages for conversation
+  const allMessages = await Message.find({ conversationId }).sort({ createdAt: 1 });
+  const formattedMessages = allMessages.map((msg: any) => ({
+    role: msg.role,
+    content: msg.content,
+  }));
+
+  // Build system message with clear objectives
+  const systemMessage = {
+    role: "system",
+    content: `You are Galaxy AI, an intelligent and helpful assistant. Today is ${new Date().toLocaleDateString()}.
+
+OBJECTIVES:
+- Provide clear, accurate, and helpful responses
+- When discussing code, use proper formatting and explain concepts clearly
+- Be concise but thorough in your explanations
+- Adapt your communication style to the user's technical level
+- For complex topics, break down information into digestible parts
+
+CONTEXT: ${memoryContext}
+
+Remember: You can help with coding, explanations, problem-solving, creative tasks, and general questions. Always strive to be helpful and informative.`,
+  };
+
+  const messagesWithContext = [systemMessage, ...formattedMessages];
+
+  // Stream Gemini response
+  const result = await streamText({
+    model: mem0("gemini-2.5-flash", { user_id: userId }),
+    messages: messagesWithContext,
+    temperature: 0.7,
+  });
+
+  // Create a readable stream for the client
+  const stream = new ReadableStream({
+    async start(controller) {
+      let aiReply = "";
+
+      try {
+        for await (const chunk of result.textStream) {
+          aiReply += chunk;
+          // Send chunk to client
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+
+        // Save AI message to DB after streaming is complete
+        await Message.create({
+          conversationId,
+          userId,
+          role: "assistant",
+          content: aiReply,
+        });
+
+        // Add AI memory
+        await addMemories([{ role: "assistant", content: [{ type: "text", text: aiReply }] }], {
+          user_id: userId,
+        });
+
+        // Generate meaningful title for new conversations
+        if (isNewConversation) {
+          try {
+            // Create a title generation request
+            const titlePrompt = `Based on this conversation starter: "${userMessage}", generate a concise, descriptive title (max 6 words) that captures the main topic or intent. Return only the title, no quotes or extra text.`;
+
+            const titleResult = await streamText({
+              model: mem0("gemini-2.5-flash", { user_id: userId }),
+              messages: [{ role: "user", content: titlePrompt }],
+              temperature: 0.3,
+            });
+
+            let generatedTitle = "";
+            for await (const chunk of titleResult.textStream) {
+              generatedTitle += chunk;
+            }
+
+            // Clean and validate the title
+            const cleanTitle = generatedTitle.trim().replace(/["']/g, "").slice(0, 60);
+            const finalTitle = cleanTitle || userMessage.split(" ").slice(0, 6).join(" ") + "...";
+
+            await Conversation.findByIdAndUpdate(conversationId, {
+              title: finalTitle,
+              updatedAt: new Date(),
+            });
+          } catch (error) {
+            console.error("Title generation failed:", error);
+            // Fallback to user message excerpt
+            const fallbackTitle = userMessage.split(" ").slice(0, 6).join(" ") + "...";
+            await Conversation.findByIdAndUpdate(conversationId, {
+              title: fallbackTitle,
+              updatedAt: new Date(),
+            });
+          }
+        }
+
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+  });
+
+  // Return streaming response to client
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Conversation-ID": conversationId,
+    },
+  });
 }

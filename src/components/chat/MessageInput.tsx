@@ -91,11 +91,14 @@ export default function MessageInput({
   return (
     <div className="w-full">
       {showUpload && (
-        <div className="mb-4">
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="text-sm font-medium">Upload File</h3>
-            <button onClick={() => setShowUpload(false)}>
-              <X size={18} />
+        <div className="mb-4 p-4 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Upload File</h3>
+            <button
+              onClick={() => setShowUpload(false)}
+              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+            >
+              <X size={16} className="text-gray-500 dark:text-gray-400" />
             </button>
           </div>
           <FileUpload
@@ -108,10 +111,15 @@ export default function MessageInput({
             <button
               onClick={handleUpload}
               disabled={isUploading}
-              className="mt-2 px-3 py-1 bg-blue-500 text-white rounded text-sm disabled:opacity-50"
+              className="mt-3 w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {isUploading ? "Uploading..." : "Upload"}
+              {isUploading ? "Uploading..." : "Upload File"}
             </button>
+          )}
+          {uploadedFileUrl && (
+            <div className="mt-3 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded text-green-700 dark:text-green-300 text-sm">
+              ✓ File uploaded successfully
+            </div>
           )}
         </div>
       )}
@@ -119,24 +127,33 @@ export default function MessageInput({
       <form onSubmit={handleFormSubmit} className="flex items-end space-x-2">
         <div className="flex-1 relative">
           <textarea
-            className="w-full border border-gray-300 dark:border-gray-700 rounded-lg p-3 pr-12 resize-none bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[60px] max-h-[200px]"
+            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-3 pr-12 resize-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[54px] max-h-[160px]"
             placeholder="Message Galaxy AI..."
             value={input}
             onChange={handleInputChange}
             rows={1}
             disabled={isLoading}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!isLoading && (input.trim() || uploadedFileUrl)) {
+                  handleFormSubmit(e as any);
+                }
+              }
+            }}
           />
           <button
             type="button"
             onClick={() => setShowUpload(!showUpload)}
-            className="absolute right-2 bottom-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            className="absolute right-2 bottom-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+            disabled={isLoading}
           >
             <Upload className="h-5 w-5" />
           </button>
         </div>
         <button
           type="submit"
-          className="p-2 rounded-lg bg-blue-500 text-white disabled:opacity-50"
+          className="p-3 rounded-lg bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 flex-shrink-0"
           disabled={isLoading || (!input.trim() && !uploadedFileUrl)}
         >
           <SendHorizontal className="h-5 w-5" />
