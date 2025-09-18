@@ -26,7 +26,7 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { isDarkMode, toggleDarkMode } = useDarkMode();
-  const { subscribe } = useConversationUpdates();
+  const { subscribeToConversationUpdates } = useConversationUpdates();
   const { showToast } = useToast();
 
   // Extract conversation ID from pathname
@@ -61,16 +61,42 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
 
   // Listen for conversation updates
   useEffect(() => {
-    const unsubscribe = subscribe((event) => {
-      if (event.type === "created" || event.type === "titleUpdated") {
-        fetchConversations(); // Refresh the list
-      } else if (event.type === "deleted" && event.conversationId) {
+    const unsubscribe = subscribeToConversationUpdates((event) => {
+      if (event.type === "conversationCreated") {
+        fetchConversations();
+      } else if (event.type === "conversationUpdated") {
+        // Update the specific conversation in the list
+        setConversations((prev) => {
+          const updated = prev.map((conv) => {
+            if (conv._id === event.conversationId) {
+              const updatedConv = {
+                ...conv,
+                ...event.updates,
+                updatedAt: event.updates.updatedAt || new Date().toISOString(),
+              };
+              return updatedConv;
+            }
+            return conv;
+          });
+          return updated;
+        });
+      } else if (event.type === "conversationDeleted") {
         setConversations((prev) => prev.filter((conv) => conv._id !== event.conversationId));
       }
     });
 
-    return unsubscribe;
-  }, [subscribe]);
+    // Also listen for manual refresh fallback
+    const handleRefreshConversations = () => {
+      fetchConversations();
+    };
+
+    window.addEventListener("refreshConversations", handleRefreshConversations);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("refreshConversations", handleRefreshConversations);
+    };
+  }, [subscribeToConversationUpdates]);
 
   // Keyboard shortcuts
   useEffect(() => {

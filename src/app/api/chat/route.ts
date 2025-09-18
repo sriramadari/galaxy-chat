@@ -202,10 +202,23 @@ Remember: You can help with coding, explanations, problem-solving, creative task
             }
           }
 
-          controller.close();
+          // Close the controller safely
+          try {
+            if (controller.desiredSize !== null) {
+              controller.close();
+            }
+          } catch (closeError) {
+            console.log("Controller already closed or closing");
+          }
         } catch (error) {
           console.error("Streaming failed or method not implemented.", error);
-          controller.error(new Error("Streaming failed"));
+          try {
+            if (controller.desiredSize !== null) {
+              controller.error(new Error("Streaming failed"));
+            }
+          } catch (errorError) {
+            console.log("Controller already in error state");
+          }
         }
       },
     });

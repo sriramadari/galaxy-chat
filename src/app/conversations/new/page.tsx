@@ -13,7 +13,7 @@ interface Message {
 }
 
 export default function NewConversationPage() {
-  const { emitConversationCreated } = useConversationUpdates();
+  const { emitConversationCreated, emitConversationUpdated } = useConversationUpdates();
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +31,41 @@ export default function NewConversationPage() {
     setHasStartedConversation(true);
 
     try {
-      // Immediately add user message to UI
+      // Step 1: Create conversation immediately and update sidebar
+      const createConversationResponse = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "New Conversation", // Temporary title
+        }),
+      });
+
+      if (!createConversationResponse.ok) {
+        const errorText = await createConversationResponse.text();
+        console.error("Failed to create conversation:", errorText);
+        throw new Error("Failed to create conversation");
+      }
+
+      const conversationData = await createConversationResponse.json();
+
+      const newConversationId = conversationData._id;
+
+      if (!newConversationId) {
+        console.error("No conversation ID in response:", conversationData);
+        throw new Error("No conversation ID returned");
+      }
+
+      // Update state and URL immediately
+      setConversationId(newConversationId);
+      window.history.replaceState(null, "", `/conversations/${newConversationId}`);
+
+      // Step 2: Update sidebar immediately with the new conversation
+      emitConversationCreated(newConversationId);
+
+      // Small delay to ensure the sidebar processes the event
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Step 3: Add user message to UI immediately
       const tempUserMessage = {
         id: `temp-user-${Date.now()}`,
         role: "user" as const,
@@ -40,7 +74,7 @@ export default function NewConversationPage() {
       };
       setMessages([tempUserMessage]);
 
-      // Add empty AI message for streaming
+      // Step 4: Add empty AI message for streaming
       const tempAiMessage = {
         id: `temp-ai-${Date.now()}`,
         role: "assistant" as const,
@@ -49,12 +83,12 @@ export default function NewConversationPage() {
       };
       setMessages((prev) => [...prev, tempAiMessage]);
 
-      // Send to chat endpoint (it will create the conversation and handle both messages)
+      // Step 5: Send to chat endpoint with the existing conversation ID
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          conversationId: undefined, // This will create a new conversation
+          conversationId: newConversationId,
           query: userMessage,
         }),
       });
@@ -74,18 +108,7 @@ export default function NewConversationPage() {
         }
       }
 
-      // Get conversation ID from response headers
-      const newConversationId = response.headers.get("X-Conversation-ID");
-
-      if (newConversationId) {
-        setConversationId(newConversationId);
-        // Update URL without page reload to reflect the conversation ID
-        window.history.replaceState(null, "", `/conversations/${newConversationId}`);
-        // Emit conversation created event for sidebar update
-        emitConversationCreated(newConversationId);
-      }
-
-      // Stream AI response
+      // Step 6: Stream AI response
       let aiResponse = "";
       const reader = response.body?.getReader();
 
@@ -122,8 +145,56 @@ export default function NewConversationPage() {
         }
       }
 
-      // Only fetch fresh data if we have a conversation ID and got some response
+      // Step 7: After streaming is complete, update the conversation title
       if (newConversationId && aiResponse.trim()) {
+        // Small delay to ensure everything is settled
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        // Generate a meaningful title based on the user's message and AI response
+        try {
+          const titleResponse = await fetch("/api/conversations/generate-title", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              conversationId: newConversationId,
+              firstMessage: userMessage,
+            }),
+          });
+
+          if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+
+            const generatedTitle = titleData.title;
+            if (generatedTitle && generatedTitle.trim() && generatedTitle !== "New Conversation") {
+              // Update sidebar immediately with the new title
+              emitConversationUpdated(newConversationId, {
+                title: generatedTitle,
+                updatedAt: new Date().toISOString(),
+              });
+
+              // Also trigger a manual refresh of conversations as a fallback
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent("refreshConversations"));
+              }, 1000);
+            } else {
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent("refreshConversations"));
+              }, 1000);
+            }
+          } else {
+            const errorText = await titleResponse.text();
+            console.error("❌ Title generation failed:", titleResponse.status, errorText);
+            // Still trigger refresh in case a fallback title was set
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent("refreshConversations"));
+            }, 1000);
+          }
+        } catch (titleError) {
+          console.error("Title generation error:", titleError);
+        }
+
+        // Step 8: Fetch fresh data from database to ensure consistency
         try {
           const res = await fetch(`/api/messages/${newConversationId}`);
           if (res.ok) {
@@ -162,6 +233,18 @@ export default function NewConversationPage() {
       setMessages([]);
       setInputValue(userMessage);
       setHasStartedConversation(false);
+
+      // If conversation was created but failed, we should clean it up
+      if (conversationId) {
+        try {
+          await fetch(`/api/conversations/${conversationId}`, {
+            method: "DELETE",
+          });
+        } catch (cleanupError) {
+          console.error("Failed to cleanup conversation:", cleanupError);
+        }
+        setConversationId(null);
+      }
     } finally {
       setIsLoading(false);
     }
