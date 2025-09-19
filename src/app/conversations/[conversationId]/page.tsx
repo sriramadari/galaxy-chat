@@ -99,6 +99,7 @@ export default function ConversationPage({
           body: JSON.stringify({
             conversationId: conversationId === "new" ? undefined : conversationId,
             query: userMessage,
+            attachments: attachments,
           }),
         });
 

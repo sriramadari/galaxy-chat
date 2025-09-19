@@ -40,7 +40,6 @@ export default function MessageInput({
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
-    console.log(attachments);
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
@@ -168,7 +167,6 @@ export default function MessageInput({
           type="file"
           multiple
           onChange={(e) => {
-            console.log("File input onChange fired");
             handleFileSelect(e);
           }}
           accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.js,.css,.html,.json,.xml"

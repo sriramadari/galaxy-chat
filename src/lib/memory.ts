@@ -6,7 +6,7 @@ let initializationError: Error | null = null;
 let isInitialized = false;
 
 const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-console.log("GOOGLE_GENERATIVE_AI_API_KEY:", process.env.GOOGLE_GENERATIVE_AI_API_KEY);
+
 // Defensive check before initializing Memory
 if (typeof apiKey === "string" && apiKey.length > 0) {
   try {
