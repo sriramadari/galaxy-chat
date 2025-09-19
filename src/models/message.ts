@@ -1,26 +1,55 @@
-import mongoose, { Schema, Document, Model } from "mongoose";
+import mongoose, { Schema, Document } from "mongoose";
 
-export interface IMessage extends Document {
-  conversationId: string;
-  userId: string;
-  role: "user" | "assistant";
-  content: string;
-  createdAt: Date;
-  updatedAt: Date;
-  edited: boolean;
+interface IAttachment {
+  id: string;
+  type: "image" | "file";
+  url: string;
+  name: string;
+  size?: number;
+  mimeType?: string;
+  publicId?: string; // Cloudinary public_id for deletion
 }
 
-const MessageSchema: Schema = new Schema({
-  conversationId: { type: Schema.Types.ObjectId, ref: "Conversation", required: true },
-  userId: { type: String, required: true },
-  role: { type: String, enum: ["user", "assistant"], required: true },
-  content: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-  edited: { type: Boolean, default: false },
+interface IMessage extends Document {
+  conversationId: mongoose.Types.ObjectId;
+  role: "user" | "assistant";
+  content: string;
+  attachments?: IAttachment[];
+  createdAt: Date;
+}
+
+const AttachmentSchema = new Schema({
+  id: { type: String, required: true },
+  type: { type: String, enum: ["image", "file"], required: true },
+  url: { type: String, required: true },
+  name: { type: String, required: true },
+  size: { type: Number },
+  mimeType: { type: String },
+  publicId: { type: String }, // For Cloudinary cleanup
 });
 
-export const Message: Model<IMessage> =
-  mongoose.models.Message || mongoose.model<IMessage>("Message", MessageSchema);
+const MessageSchema = new Schema<IMessage>({
+  conversationId: {
+    type: Schema.Types.ObjectId,
+    ref: "Conversation",
+    required: true,
+  },
+  role: {
+    type: String,
+    enum: ["user", "assistant"],
+    required: true,
+  },
+  content: {
+    type: String,
+    required: true,
+  },
+  attachments: [AttachmentSchema],
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
 
-export default Message;
+MessageSchema.index({ conversationId: 1, createdAt: 1 });
+
+export default mongoose.models.Message || mongoose.model<IMessage>("Message", MessageSchema);

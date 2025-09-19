@@ -1,15 +1,36 @@
 import React, { useState } from "react";
-import { Pencil, RotateCcw, Copy, Check as CheckIcon, Bot, User } from "lucide-react";
+import {
+  Pencil,
+  RotateCcw,
+  Copy,
+  Check as CheckIcon,
+  Bot,
+  User,
+  Download,
+  FileText,
+  Image as ImageIcon,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 
-// Define our custom message type
+// Define attachment type
+interface Attachment {
+  id: string;
+  type: "image" | "file";
+  url: string;
+  name: string;
+  size?: number;
+  mimeType?: string;
+}
+
+// Updated message interface to include attachments
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: Attachment[];
 }
 
 interface MessageItemProps {
@@ -107,6 +128,89 @@ const CodeBlock = ({ children, className, ...props }: any) => {
   );
 };
 
+// Attachment display component
+const AttachmentDisplay = ({ attachment }: { attachment: Attachment }) => {
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return "";
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
+  };
+
+  const handleDownload = async () => {
+    try {
+      const response = await fetch(attachment.url);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = attachment.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Failed to download file:", error);
+    }
+  };
+
+  if (attachment.type === "image") {
+    return (
+      <div className="mb-3 group">
+        <div className="relative inline-block rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+          <img
+            src={attachment.url}
+            alt={attachment.name}
+            className="max-w-full max-h-96 w-auto h-auto object-contain"
+            onLoad={(e) => {
+              const img = e.target as HTMLImageElement;
+              // Add a subtle shadow when image loads
+              img.style.boxShadow = "0 4px 6px -1px rgba(0, 0, 0, 0.1)";
+            }}
+          />
+          <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+            <button
+              onClick={handleDownload}
+              className="bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 p-2 rounded-full shadow-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200"
+              title="Download image"
+            >
+              <Download className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          {attachment.name} {attachment.size && `(${formatFileSize(attachment.size)})`}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3 inline-block">
+      <div
+        className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 group cursor-pointer"
+        onClick={handleDownload}
+      >
+        <div className="flex-shrink-0">
+          <FileText className="h-8 w-8 text-blue-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+            {attachment.name}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {attachment.size && formatFileSize(attachment.size)}
+            {attachment.mimeType && ` • ${attachment.mimeType}`}
+          </p>
+        </div>
+        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <Download className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function MessageItem({ message, onEdit, onReAsk, isStreaming }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(message.content);
@@ -179,6 +283,16 @@ export default function MessageItem({ message, onEdit, onReAsk, isStreaming }: M
               </div>
             ) : (
               <div className="prose prose-gray dark:prose-invert max-w-none prose-sm">
+                {/* Render attachments first */}
+                {message.attachments && message.attachments.length > 0 && (
+                  <div className="mb-4">
+                    {message.attachments.map((attachment) => (
+                      <AttachmentDisplay key={attachment.id} attachment={attachment} />
+                    ))}
+                  </div>
+                )}
+
+                {/* Render text content */}
                 {isUser ? (
                   <div className="text-gray-900 dark:text-gray-100 leading-7 whitespace-pre-wrap break-words">
                     {message.content}

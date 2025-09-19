@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import dbConnect from "@/lib/db";
-import { Message } from "@/models/message";
+import Message from "@/models/message";
 
 export async function POST(req: NextRequest) {
   await dbConnect();

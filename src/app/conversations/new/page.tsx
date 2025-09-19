@@ -12,6 +12,15 @@ interface Message {
   createdAt: string;
 }
 
+interface Attachment {
+  id: string;
+  type: "image" | "file";
+  url: string;
+  name: string;
+  size?: number;
+  mimeType?: string;
+}
+
 export default function NewConversationPage() {
   const { emitConversationCreated, emitConversationUpdated } = useConversationUpdates();
   const [inputValue, setInputValue] = useState("");
@@ -20,6 +29,7 @@ export default function NewConversationPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [hasStartedConversation, setHasStartedConversation] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   const sendMessage = async (userMessage: string) => {
     if (!userMessage.trim() || isLoading) return;
@@ -147,9 +157,6 @@ export default function NewConversationPage() {
 
       // Step 7: After streaming is complete, update the conversation title
       if (newConversationId && aiResponse.trim()) {
-        // Small delay to ensure everything is settled
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
         // Generate a meaningful title based on the user's message and AI response
         try {
           const titleResponse = await fetch("/api/conversations/generate-title", {
@@ -172,11 +179,6 @@ export default function NewConversationPage() {
                 title: generatedTitle,
                 updatedAt: new Date().toISOString(),
               });
-
-              // Also trigger a manual refresh of conversations as a fallback
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent("refreshConversations"));
-              }, 1000);
             } else {
               setTimeout(() => {
                 window.dispatchEvent(new CustomEvent("refreshConversations"));
@@ -251,7 +253,6 @@ export default function NewConversationPage() {
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
     if (inputValue.trim()) {
       sendMessage(inputValue);
     }
@@ -505,6 +506,8 @@ export default function NewConversationPage() {
                 handleInputChange={handleInputChange}
                 handleSubmit={handleSubmit}
                 isLoading={isLoading}
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
               />
               {error && <div className="text-red-500 text-sm mt-2 text-center">{error}</div>}
             </div>
@@ -530,6 +533,8 @@ export default function NewConversationPage() {
                 handleInputChange={handleInputChange}
                 handleSubmit={handleSubmit}
                 isLoading={isLoading}
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
               />
               {error && <div className="text-red-500 text-sm mt-2 text-center">{error}</div>}
             </div>

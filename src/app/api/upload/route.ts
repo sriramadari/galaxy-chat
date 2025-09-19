@@ -1,77 +1,62 @@
-import { google } from "@ai-sdk/google";
-import { streamText } from "ai";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { storeConversation, retrieveConversation, searchMemory } from "@/lib/memory-fallback";
+import { uploadToCloudinary, validateFile, getFileType } from "@/lib/cloudinary";
 
-// Allow streaming responses up to 30 seconds
-export const maxDuration = 30;
-
-export async function POST(req: Request) {
-  // Check authentication
-  const { userId } = await auth();
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export async function POST(request: NextRequest) {
   try {
-    // Get messages and conversation ID from the request
-    const { messages, conversationId, query } = await req.json();
-
-    if (!messages || !Array.isArray(messages)) {
-      return Response.json({ error: "Invalid messages format" }, { status: 400 });
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Retrieve past conversation context if conversationId is provided
-    let contextualMemories = [];
-    if (conversationId) {
-      contextualMemories = await retrieveConversation(userId, conversationId);
+    const formData = await request.formData();
+    const file = formData.get("file") as File;
+
+    if (!file) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    // If there's a specific query, search for relevant memories
-    let relevantMemories: any[] = [];
-    if (query) {
-      relevantMemories = await searchMemory(userId, query);
+    // Validate file
+    const validation = validateFile(file);
+    if (!validation.isValid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
     }
 
-    // Build system message with contextual information
-    const systemMessage = {
-      role: "system",
-      content: `You are a helpful assistant named Galaxy AI. Today is ${new Date().toLocaleDateString()}.`,
-    };
+    try {
+      // Upload to Cloudinary
+      const uploadResult = await uploadToCloudinary(file);
 
-    // Add relevant memories as context if found
-    if (relevantMemories && relevantMemories.length > 0) {
-      systemMessage.content += `\n\nRelevant information from previous conversations:\n${relevantMemories
-        .map((mem: any) => `- ${mem.text}`)
-        .join("\n")}`;
+      // Create attachment object
+      const attachment = {
+        id: crypto.randomUUID(),
+        type: getFileType(file.type),
+        url: uploadResult.secure_url,
+        name: uploadResult.original_filename || file.name,
+        size: uploadResult.bytes,
+        mimeType: file.type,
+        publicId: uploadResult.public_id,
+      };
+
+      return NextResponse.json({
+        success: true,
+        attachment,
+      });
+    } catch (uploadError) {
+      console.error("Cloudinary upload error:", uploadError);
+      return NextResponse.json(
+        { error: "Failed to upload file. Please try again." },
+        { status: 500 }
+      );
     }
-
-    // Combine everything for the model
-    const messagesWithContext = [systemMessage, ...contextualMemories, ...messages];
-
-    // Use Vercel AI SDK streamText for chat
-    const result = await streamText({
-      model: google("gemini-2.5-flash"),
-      messages: messagesWithContext,
-      temperature: 0.7,
-    });
-
-    // Store the updated conversation (do this asynchronously)
-    if (userId && conversationId) {
-      // We can't await the complete text here as it would block the response
-      // Instead, we store the messages we sent to the API
-      storeConversation(userId, conversationId, messages);
-    }
-
-    // Return streaming response
-    return result.toTextStreamResponse();
-  } catch (error: any) {
-    console.error("Error generating response:", error);
-
-    // Always return a Response object, even in error cases
-    return Response.json(
-      { error: error.message || "Failed to generate response" },
-      { status: 500 }
-    );
+  } catch (error) {
+    console.error("Upload endpoint error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+// Configure Next.js to handle file uploads
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};

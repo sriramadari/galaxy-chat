@@ -12,6 +12,15 @@ interface Message {
   createdAt: string;
 }
 
+interface Attachment {
+  id: string;
+  type: "image" | "file";
+  url: string;
+  name: string;
+  size?: number;
+  mimeType?: string;
+}
+
 export default function ConversationPage({
   params,
   searchParams,
@@ -29,6 +38,7 @@ export default function ConversationPage({
   const searchParamsObj = React.use(searchParams);
   const conversationId = paramObj.conversationId;
   const initialMessage = searchParamsObj.initialMessage;
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   useEffect(() => {
     async function fetchMessages() {
@@ -172,7 +182,6 @@ export default function ConversationPage({
   ]);
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
     if (inputValue.trim()) {
       sendMessage(inputValue);
     }
@@ -323,6 +332,8 @@ export default function ConversationPage({
             handleInputChange={handleInputChange}
             handleSubmit={handleSubmit}
             isLoading={isLoading}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
           />
           {error && <div className="text-red-500 text-sm mt-2 text-center">{error}</div>}
         </div>

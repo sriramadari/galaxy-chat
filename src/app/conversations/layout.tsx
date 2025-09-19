@@ -63,23 +63,16 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = subscribeToConversationUpdates((event) => {
       if (event.type === "conversationCreated") {
-        fetchConversations();
+        setConversations((prev) => [
+          {
+            _id: event.conversationId,
+            title: "new Conversation",
+            updatedAt: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
       } else if (event.type === "conversationUpdated") {
-        // Update the specific conversation in the list
-        setConversations((prev) => {
-          const updated = prev.map((conv) => {
-            if (conv._id === event.conversationId) {
-              const updatedConv = {
-                ...conv,
-                ...event.updates,
-                updatedAt: event.updates.updatedAt || new Date().toISOString(),
-              };
-              return updatedConv;
-            }
-            return conv;
-          });
-          return updated;
-        });
+        fetchConversations();
       } else if (event.type === "conversationDeleted") {
         setConversations((prev) => prev.filter((conv) => conv._id !== event.conversationId));
       }

@@ -1,16 +1,25 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import { useUser } from "@clerk/nextjs";
-import { v4 as uuidv4 } from "uuid";
+import { useConversationUpdates } from "@/hooks/useConversationUpdates";
 
 // Define a basic message type
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+}
+
+interface Attachment {
+  id: string;
+  type: "image" | "file";
+  url: string;
+  name: string;
+  size?: number;
+  mimeType?: string;
 }
 
 interface ChatContainerProps {
@@ -21,12 +30,14 @@ export default function ChatContainer({
   conversationId: initialConversationId,
 }: ChatContainerProps) {
   const { user } = useUser();
+  const { emitConversationCreated } = useConversationUpdates();
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string>(initialConversationId || "");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   // On mount, create a new conversation if none exists
   useEffect(() => {
@@ -90,51 +101,106 @@ export default function ChatContainer({
     }
   }, [messages]);
 
-  const sendMessage = async (userMessage: string) => {
-    if (!userMessage.trim() || isLoading || !conversationId) return;
+  const sendMessage = useCallback(
+    async (userMessage: string, currentAttachments: Attachment[] = []) => {
+      if ((!userMessage.trim() && currentAttachments.length === 0) || isLoading) return;
 
-    // Set loading immediately
-    setIsLoading(true);
-    setError(null);
+      setInputValue("");
+      setIsLoading(true);
+      setError(null);
 
-    const messageId = uuidv4();
-    const newUserMessage: Message = {
-      id: messageId,
-      role: "user",
-      content: userMessage,
-    };
-
-    // Update UI immediately with user message
-    const updatedMessages = [...messages, newUserMessage];
-    setMessages(updatedMessages);
-
-    try {
-      // Save message to DB (async, don't wait)
-      fetch("/api/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId,
-          userId: user?.id,
-          role: "user",
+      try {
+        // Optimistically add user message
+        const tempUserMessage = {
+          id: `temp-user-${Date.now()}`,
+          role: "user" as const,
           content: userMessage,
-        }),
-      }).catch((err) => console.error("Error saving user message:", err));
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, tempUserMessage]);
 
-      // Generate AI response immediately
-      await generateAIResponse(userMessage, updatedMessages);
-    } catch (err: any) {
-      setError(err.message || "Failed to send message");
-      // Remove the user message if saving failed
-      setMessages(messages);
-    }
-  };
+        // Add empty AI message for streaming
+        const tempAiMessage = {
+          id: `temp-ai-${Date.now()}`,
+          role: "assistant" as const,
+          content: "",
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, tempAiMessage]);
+
+        // Send to chat endpoint with attachments
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: conversationId === "new" ? undefined : conversationId,
+            query: userMessage,
+            attachments: currentAttachments, // <-- send attachments here
+          }),
+        });
+
+        if (!response.ok) throw new Error("Failed to get response");
+
+        // Get conversation ID from response headers (for new conversations)
+        const newConversationId = response.headers.get("X-Conversation-ID");
+        let actualConversationId = conversationId;
+
+        if (newConversationId && conversationId === "new") {
+          actualConversationId = newConversationId;
+          window.history.replaceState(null, "", `/conversations/${newConversationId}`);
+        }
+
+        // Stream AI response
+        let aiResponse = "";
+        const reader = response.body?.getReader();
+
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = new TextDecoder().decode(value);
+            aiResponse += chunk;
+
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === tempAiMessage.id ? { ...msg, content: aiResponse } : msg
+              )
+            );
+          }
+        }
+
+        // Refresh messages from DB
+        const res = await fetch(`/api/messages/${actualConversationId}`);
+        const data = await res.json();
+        const mapped = data.map((msg: any) => ({
+          id: msg._id || msg.id,
+          role: msg.role,
+          content: msg.content,
+          createdAt: msg.createdAt,
+        }));
+        setMessages(mapped);
+
+        // Trigger conversation list refresh if this was a new conversation
+        if (newConversationId && conversationId === "new") {
+          emitConversationCreated(newConversationId);
+        }
+      } catch (error: any) {
+        console.error("Failed to send message:", error);
+        setError(error.message || "An error occurred");
+        setMessages((prev) => prev.filter((msg) => !msg.id.startsWith("temp-")));
+        setInputValue(userMessage);
+      } finally {
+        setIsLoading(false);
+        setAttachments([]); // <-- clear attachments after sending
+      }
+    },
+    [conversationId, isLoading, emitConversationCreated]
+  );
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (inputValue.trim()) {
-      sendMessage(inputValue);
-      setInputValue("");
+      sendMessage(inputValue, attachments); // <-- pass attachments
     }
   };
 
@@ -317,13 +383,15 @@ export default function ChatContainer({
         />
         <div ref={messagesEndRef} />
       </div>
-      <div className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
+      <div className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
         <div className="max-w-3xl mx-auto">
           <MessageInput
             input={inputValue}
             handleInputChange={handleInputChange}
             handleSubmit={handleSubmit}
             isLoading={isLoading}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
           />
           {error && (
             <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
