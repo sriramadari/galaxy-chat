@@ -11,6 +11,8 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt: string;
+  attachments?: Attachment[];
 }
 
 interface Attachment {
@@ -177,6 +179,7 @@ export default function ChatContainer({
           role: msg.role,
           content: msg.content,
           createdAt: msg.createdAt,
+          attachments: msg.attachments,
         }));
         setMessages(mapped);
 
@@ -198,7 +201,6 @@ export default function ChatContainer({
   );
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
     if (inputValue.trim()) {
       sendMessage(inputValue, attachments); // <-- pass attachments
     }
@@ -316,7 +318,10 @@ export default function ChatContainer({
       let aiResponseBuffer = "";
 
       // Add an empty AI message that will be updated during streaming
-      setMessages((prev) => [...prev, { id: aiResponseId, role: "assistant", content: "" }]);
+      setMessages((prev) => [
+        ...prev,
+        { id: aiResponseId, role: "assistant", content: "", createdAt: new Date().toISOString() },
+      ]);
 
       // Simple streaming with immediate updates
       const decoder = new TextDecoder();

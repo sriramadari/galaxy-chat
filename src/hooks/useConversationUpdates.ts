@@ -14,6 +14,7 @@ export interface ConversationUpdatedEvent {
   updates: {
     title?: string;
     updatedAt?: string;
+    attachments?: any;
   };
 }
 
@@ -40,7 +41,10 @@ export const useConversationUpdates = () => {
   }, []);
 
   const emitConversationUpdated = useCallback(
-    (conversationId: string, updates: { title?: string; updatedAt?: string }) => {
+    (
+      conversationId: string,
+      updates: { title?: string; updatedAt?: string; attachments?: any }
+    ) => {
       const event = new CustomEvent<ConversationUpdatedEvent>("conversationUpdate", {
         detail: {
           type: "conversationUpdated",

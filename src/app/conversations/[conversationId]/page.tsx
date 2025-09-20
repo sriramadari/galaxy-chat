@@ -10,6 +10,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  attachments?: Attachment[];
 }
 
 interface Attachment {
@@ -52,6 +53,7 @@ export default function ConversationPage({
           role: msg.role,
           content: msg.content,
           createdAt: msg.createdAt,
+          attachments: msg.attachments,
         }));
         setMessages(mapped);
       } catch (error: any) {
@@ -65,7 +67,7 @@ export default function ConversationPage({
   }, [conversationId]);
 
   const sendMessage = useCallback(
-    async (userMessage: string) => {
+    async (userMessage: string, currentAttachments: Attachment[]) => {
       if (!userMessage.trim() || isLoading) return;
 
       // Clear input immediately and show user message
@@ -80,6 +82,7 @@ export default function ConversationPage({
           role: "user" as const,
           content: userMessage,
           createdAt: new Date().toISOString(),
+          attachments: currentAttachments,
         };
         setMessages((prev) => [...prev, tempUserMessage]);
 
@@ -99,7 +102,7 @@ export default function ConversationPage({
           body: JSON.stringify({
             conversationId: conversationId === "new" ? undefined : conversationId,
             query: userMessage,
-            attachments: attachments,
+            attachments: currentAttachments,
           }),
         });
 
@@ -143,14 +146,15 @@ export default function ConversationPage({
           role: msg.role,
           content: msg.content,
           createdAt: msg.createdAt,
+          attachments: msg.attachments,
         }));
         setMessages(mapped);
 
         // Trigger conversation list refresh if this was a new conversation
         if (newConversationId && conversationId === "new") {
-          // Emit conversation created event
           emitConversationCreated(newConversationId);
         }
+        setAttachments([]);
       } catch (error: any) {
         console.error("Failed to send message:", error);
         setError(error.message || "An error occurred");
@@ -159,6 +163,7 @@ export default function ConversationPage({
         setInputValue(userMessage);
       } finally {
         setIsLoading(false);
+        setAttachments([]);
       }
     },
     [conversationId, isLoading, emitConversationCreated]
@@ -171,7 +176,7 @@ export default function ConversationPage({
       // Clear the URL parameter
       window.history.replaceState(null, "", `/conversations/${conversationId}`);
       // Send the initial message
-      sendMessage(initialMessage);
+      sendMessage(initialMessage, attachments);
     }
   }, [
     initialMessage,
@@ -183,9 +188,10 @@ export default function ConversationPage({
   ]);
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    if (inputValue.trim()) {
-      sendMessage(inputValue);
-    }
+    if (!inputValue.trim() && attachments.length === 0) return;
+    const currentAttachments = attachments;
+    setAttachments([]); // Clear attachments immediately
+    sendMessage(inputValue, currentAttachments);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -257,6 +263,8 @@ export default function ConversationPage({
       const messagesToKeep = messages.slice(0, messageIndex + 1);
       setMessages(messagesToKeep);
 
+      const lastMessageAttachments = messagesToKeep[messagesToKeep.length - 1]?.attachments;
+
       // Add empty AI message for streaming
       const tempAiMessage = {
         id: `temp-ai-${Date.now()}`,
@@ -273,6 +281,7 @@ export default function ConversationPage({
         body: JSON.stringify({
           conversationId,
           query: messageToReAsk.content,
+          attachments: lastMessageAttachments,
           skipUserSave: true, // Don't save the user message again
         }),
       });
@@ -304,6 +313,7 @@ export default function ConversationPage({
         role: msg.role,
         content: msg.content,
         createdAt: msg.createdAt,
+        attachments: msg.attachments,
       }));
       setMessages(mapped);
     } catch (err: any) {

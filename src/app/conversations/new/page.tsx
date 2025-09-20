@@ -10,6 +10,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  attachments?: Attachment[];
 }
 
 interface Attachment {
@@ -31,60 +32,62 @@ export default function NewConversationPage() {
   const [hasStartedConversation, setHasStartedConversation] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
-  const sendMessage = async (userMessage: string) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    if (!inputValue.trim() && attachments.length === 0) return;
+    const currentAttachments = attachments;
+    setAttachments([]); // Clear attachments immediately
+    sendMessage(inputValue, currentAttachments);
+  };
+
+  const sendMessage = async (userMessage: string, currentAttachments: Attachment[]) => {
     if (!userMessage.trim() || isLoading) return;
 
-    // Clear input immediately and show user message
     setInputValue("");
     setIsLoading(true);
     setError(null);
     setHasStartedConversation(true);
 
     try {
-      // Step 1: Create conversation immediately and update sidebar
-      const createConversationResponse = await fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "New Conversation", // Temporary title
-        }),
-      });
+      let newConversationId = conversationId;
 
-      if (!createConversationResponse.ok) {
-        const errorText = await createConversationResponse.text();
-        console.error("Failed to create conversation:", errorText);
-        throw new Error("Failed to create conversation");
-      }
-
-      const conversationData = await createConversationResponse.json();
-
-      const newConversationId = conversationData._id;
-
+      // Only create a new conversation if it doesn't exist
       if (!newConversationId) {
-        console.error("No conversation ID in response:", conversationData);
-        throw new Error("No conversation ID returned");
+        const createConversationResponse = await fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "New Conversation" }),
+        });
+
+        if (!createConversationResponse.ok) {
+          const errorText = await createConversationResponse.text();
+          console.error("Failed to create conversation:", errorText);
+          throw new Error("Failed to create conversation");
+        }
+
+        const conversationData = await createConversationResponse.json();
+        newConversationId = conversationData._id;
+
+        if (!newConversationId) throw new Error("No conversation ID returned");
+
+        setConversationId(newConversationId);
+        window.history.replaceState(null, "", `/conversations/${newConversationId}`);
+        emitConversationCreated(newConversationId);
+
+        // Small delay to ensure sidebar updates
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      // Update state and URL immediately
-      setConversationId(newConversationId);
-      window.history.replaceState(null, "", `/conversations/${newConversationId}`);
-
-      // Step 2: Update sidebar immediately with the new conversation
-      emitConversationCreated(newConversationId);
-
-      // Small delay to ensure the sidebar processes the event
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Step 3: Add user message to UI immediately
+      // Add user message optimistically
       const tempUserMessage = {
         id: `temp-user-${Date.now()}`,
         role: "user" as const,
         content: userMessage,
         createdAt: new Date().toISOString(),
+        attachments: currentAttachments,
       };
-      setMessages([tempUserMessage]);
+      setMessages([...messages, tempUserMessage]);
 
-      // Step 4: Add empty AI message for streaming
+      // Add placeholder AI message for streaming
       const tempAiMessage = {
         id: `temp-ai-${Date.now()}`,
         role: "assistant" as const,
@@ -93,76 +96,46 @@ export default function NewConversationPage() {
       };
       setMessages((prev) => [...prev, tempAiMessage]);
 
-      // Step 5: Send to chat endpoint with the existing conversation ID
+      // Send to chat endpoint
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversationId: newConversationId,
           query: userMessage,
+          attachments: currentAttachments,
         }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
         console.error("API Error:", response.status, errorText);
-
-        if (response.status === 503) {
-          throw new Error(
-            "The AI service is currently overloaded. Please try again in a few moments."
-          );
-        } else if (response.status >= 500) {
-          throw new Error("Server error occurred. Please try again later.");
-        } else {
-          throw new Error(`Failed to get response: ${response.status}`);
-        }
+        throw new Error(`Failed to get response: ${response.status}`);
       }
 
-      // Step 6: Stream AI response
+      // Stream AI response
       let aiResponse = "";
       const reader = response.body?.getReader();
 
       if (reader) {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = new TextDecoder().decode(value);
-            aiResponse += chunk;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          aiResponse += chunk;
 
-            // Update the AI message in real-time for streaming effect
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === tempAiMessage.id ? { ...msg, content: aiResponse } : msg
-              )
-            );
-          }
-        } catch (streamError) {
-          console.error("Streaming error:", streamError);
-          // If streaming fails, show an error message in the AI response
           setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === tempAiMessage.id
-                ? {
-                    ...msg,
-                    content:
-                      "Sorry, I encountered an error while generating the response. The AI service might be overloaded. Please try again in a moment.",
-                  }
-                : msg
-            )
+            prev.map((msg) => (msg.id === tempAiMessage.id ? { ...msg, content: aiResponse } : msg))
           );
-          throw new Error("AI service is temporarily unavailable. Please try again.");
         }
       }
 
-      // Step 7: After streaming is complete, update the conversation title
-      if (newConversationId && aiResponse.trim()) {
-        // Generate a meaningful title based on the user's message and AI response
+      // Optionally generate conversation title if first message
+      if (newConversationId && aiResponse.trim() && !conversationId) {
         try {
           const titleResponse = await fetch("/api/conversations/generate-title", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            credentials: "include",
             body: JSON.stringify({
               conversationId: newConversationId,
               firstMessage: userMessage,
@@ -171,90 +144,41 @@ export default function NewConversationPage() {
 
           if (titleResponse.ok) {
             const titleData = await titleResponse.json();
-
             const generatedTitle = titleData.title;
-            if (generatedTitle && generatedTitle.trim() && generatedTitle !== "New Conversation") {
-              // Update sidebar immediately with the new title
+            if (generatedTitle && generatedTitle !== "New Conversation") {
               emitConversationUpdated(newConversationId, {
                 title: generatedTitle,
                 updatedAt: new Date().toISOString(),
               });
-            } else {
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent("refreshConversations"));
-              }, 1000);
             }
-          } else {
-            const errorText = await titleResponse.text();
-            console.error("❌ Title generation failed:", titleResponse.status, errorText);
-            // Still trigger refresh in case a fallback title was set
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent("refreshConversations"));
-            }, 1000);
           }
         } catch (titleError) {
           console.error("Title generation error:", titleError);
         }
+      }
 
-        // Step 8: Fetch fresh data from database to ensure consistency
-        try {
-          const res = await fetch(`/api/messages/${newConversationId}`);
-          if (res.ok) {
-            const data = await res.json();
-            const mapped = data.map((msg: any) => ({
-              id: msg._id || msg.id,
-              role: msg.role,
-              content: msg.content,
-              createdAt: msg.createdAt,
-            }));
-            setMessages(mapped);
-          }
-        } catch (fetchError) {
-          console.error("Failed to fetch fresh messages:", fetchError);
-          // Continue with the current messages if fetching fails
+      // Fetch fresh messages to ensure consistency
+      try {
+        const res = await fetch(`/api/messages/${newConversationId}`);
+        if (res.ok) {
+          const data = await res.json();
+          const mapped = data.map((msg: any) => ({
+            id: msg._id || msg.id,
+            role: msg.role,
+            content: msg.content,
+            createdAt: msg.createdAt,
+            attachments: msg.attachments,
+          }));
+          setMessages(mapped);
         }
+      } catch (fetchError) {
+        console.error("Failed to fetch fresh messages:", fetchError);
       }
     } catch (error: any) {
       console.error("Failed to send message:", error);
-
-      // Provide more specific error messages
-      let errorMessage = "An error occurred";
-      if (error.message.includes("AI service is temporarily unavailable")) {
-        errorMessage = error.message;
-      } else if (error.message.includes("Failed to fetch")) {
-        errorMessage = "Network error. Please check your connection and try again.";
-      } else if (error.message.includes("overloaded")) {
-        errorMessage = "The AI service is currently overloaded. Please try again in a few moments.";
-      } else {
-        errorMessage = error.message || "An unexpected error occurred";
-      }
-
-      setError(errorMessage);
-
-      // Remove the optimistic messages on error and restore input
-      setMessages([]);
-      setInputValue(userMessage);
-      setHasStartedConversation(false);
-
-      // If conversation was created but failed, we should clean it up
-      if (conversationId) {
-        try {
-          await fetch(`/api/conversations/${conversationId}`, {
-            method: "DELETE",
-          });
-        } catch (cleanupError) {
-          console.error("Failed to cleanup conversation:", cleanupError);
-        }
-        setConversationId(null);
-      }
+      setError(error.message || "An unexpected error occurred");
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    if (inputValue.trim()) {
-      sendMessage(inputValue);
     }
   };
 
@@ -413,6 +337,7 @@ export default function NewConversationPage() {
               role: msg.role,
               content: msg.content,
               createdAt: msg.createdAt,
+              attachments: msg.attachments,
             }));
             setMessages(mapped);
           }

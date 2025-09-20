@@ -6,6 +6,7 @@ import Conversation from "@/models/conversation";
 import Message from "@/models/message";
 import { google } from "@ai-sdk/google";
 import MemoryClient, { Message as MemMessage, MemoryOptions } from "mem0ai";
+import { Buffer } from "buffer";
 
 const mem0 = createMem0({
   provider: "google",
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
         ],
       };
 
-      memoryContext = await memoryClient.search(userMessage, { version: "v2", filters });
+      memoryContext = await memoryClient.search(userMessage, { api_version: "v2", filters });
     } else {
       // Use old mem0 addMemories/retrieveMemories
       await addMemories([{ role: "user", content: [{ type: "text", text: userMessage }] }], {
@@ -144,12 +145,15 @@ export async function POST(req: Request) {
     if (attachments.length > 0) {
       // With attachment: build user content with file
       const file = attachments[0];
+
+      const fileData = file.url;
+
       const userContent = [
         { type: "text", text: userMessage },
         {
           type: "file",
           mediaType: file.mimeType,
-          data: file.url,
+          data: fileData,
           filename: file.name,
         },
       ];

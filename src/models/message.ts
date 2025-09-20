@@ -12,10 +12,12 @@ interface IAttachment {
 
 interface IMessage extends Document {
   conversationId: mongoose.Types.ObjectId;
+  userId: string;
   role: "user" | "assistant";
   content: string;
   attachments?: IAttachment[];
   createdAt: Date;
+  edited?: boolean;
 }
 
 const AttachmentSchema = new Schema({
@@ -34,6 +36,7 @@ const MessageSchema = new Schema<IMessage>({
     ref: "Conversation",
     required: true,
   },
+  userId: { type: String, required: true },
   role: {
     type: String,
     enum: ["user", "assistant"],
@@ -48,6 +51,7 @@ const MessageSchema = new Schema<IMessage>({
     type: Date,
     default: Date.now,
   },
+  edited: { type: Boolean, default: false },
 });
 
 MessageSchema.index({ conversationId: 1, createdAt: 1 });

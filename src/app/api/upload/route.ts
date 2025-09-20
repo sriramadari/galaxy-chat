@@ -17,14 +17,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file
-    const validation = validateFile(file);
-    if (!validation.isValid) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
-    }
+    const fileBuffer = await file.arrayBuffer();
+
+    const mimetype = file.type;
+    const filename = file.name;
+    const encoding = "base64";
+    const dataOfBase64 = Buffer.from(fileBuffer).toString("base64");
+
+    const pdfUrl = "data:" + mimetype + ";" + encoding + "," + dataOfBase64;
 
     try {
       // Upload to Cloudinary
-      const uploadResult = await uploadToCloudinary(file);
+      const uploadResult = await uploadToCloudinary(mimetype, pdfUrl, filename);
 
       // Create attachment object
       const attachment = {

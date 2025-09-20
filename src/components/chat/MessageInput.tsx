@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Button } from "../ui/Button";
 import { Send, Paperclip, X, Upload, Image as ImageIcon, FileText } from "lucide-react";
 
@@ -42,6 +42,13 @@ export default function MessageInput({
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) {
+        alert("Cloudinary Error : Only images are allowed to upload.");
+        return;
+      }
+    }
+
     setIsUploading(true);
     const newAttachments: Attachment[] = [];
 
@@ -56,21 +63,21 @@ export default function MessageInput({
         }
 
         // --- Replace with actual upload API call ---
-        // const response = await fetch('/api/upload', { method: 'POST', body: formData });
-        // const { attachment } = await response.json();
-        const response = {
-          success: true,
-          attachment: {
-            id: Math.random().toString(36).slice(2),
-            type: file.type.startsWith("image") ? "image" : "file",
-            url: "https://res.cloudinary.com/dkilulg3q/image/upload/v1758224162/h4sxuz2oo9bhqcvhmfnv.jpg",
-            name: file.name,
-            size: file.size,
-            mimeType: file.type,
-            publicId: "h4sxuz2oo9bhqcvhmfnv",
-          },
-        };
-        const { attachment } = response;
+        const response = await fetch("/api/upload", { method: "POST", body: formData });
+        const { attachment } = await response.json();
+        // const response = {
+        //   success: true,
+        //   attachment: {
+        //     id: Math.random().toString(36).slice(2),
+        //     type: "file",
+        //     url: "https://res.cloudinary.com/dkilulg3q/raw/upload/v1758317682/stmeac6eapwtlxxgv8dr.pdf",
+        //     name: "Sriram Adari - Toddle CV",
+        //     size: 124859,
+        //     mimeType: "application/pdf",
+        //     publicId: "stmeac6eapwtlxxgv8dr.pdf",
+        //   },
+        // };
+        // const { attachment } = response;
         const fixedAttachment = {
           ...attachment,
           type: attachment.mimeType.startsWith("image/") ? "image" : "file",
@@ -79,7 +86,7 @@ export default function MessageInput({
       }
       if (onAttachmentsChange) {
         console.log("newAttachments pushed:", newAttachments);
-        onAttachmentsChange(newAttachments);
+        onAttachmentsChange([...attachments, ...newAttachments]);
       }
     } catch (error) {
       console.error("Failed to upload files:", error);
@@ -145,6 +152,7 @@ export default function MessageInput({
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          onAttachmentsChange([]);
           handleSubmit({ ...e, attachments } as any);
         }}
         className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-xl px-3 py-1 shadow-sm border border-gray-200 dark:border-gray-700"
@@ -182,6 +190,7 @@ export default function MessageInput({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
+              onAttachmentsChange([]);
               handleSubmit({ ...e, attachments } as any);
             }
           }}

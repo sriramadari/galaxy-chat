@@ -54,10 +54,10 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (user) {
+    if (isLoaded && user) {
       fetchConversations();
     }
-  }, [user]);
+  }, [isLoaded, user]);
 
   // Listen for conversation updates
   useEffect(() => {
@@ -72,7 +72,18 @@ function ConversationsLayoutInner({ children }: { children: React.ReactNode }) {
           ...prev,
         ]);
       } else if (event.type === "conversationUpdated") {
-        fetchConversations();
+        setConversations((prev) =>
+          prev.map((conv) =>
+            conv._id === event.conversationId
+              ? {
+                  ...conv,
+                  title: event.updates.title ?? conv.title,
+                  updatedAt: event.updates.updatedAt ?? conv.updatedAt,
+                  attachments: event.updates.attachments || [],
+                }
+              : conv
+          )
+        );
       } else if (event.type === "conversationDeleted") {
         setConversations((prev) => prev.filter((conv) => conv._id !== event.conversationId));
       }

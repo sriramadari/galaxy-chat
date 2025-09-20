@@ -16,31 +16,41 @@ export interface CloudinaryUploadResult {
   original_filename: string;
 }
 
-export const uploadToCloudinary = async (file: File): Promise<CloudinaryUploadResult> => {
-  const formData = new FormData();
-  formData.append("file", file);
+export const uploadToCloudinary = async (
+  fileType: string,
+  pdfUrl: string,
+  fileName: string
+): Promise<CloudinaryUploadResult> => {
+  // const formData = new FormData();
+  // formData.append("file", file);
 
   // Use a simple unsigned preset for testing
-  const isImage = file.type.startsWith("image/");
+  const isImage = fileType.startsWith("image/");
   const uploadPreset = isImage ? "galaxy_images" : "galaxy_files";
-  formData.append("upload_preset", uploadPreset);
+  // formData.append("upload_preset", uploadPreset);
 
   // Minimal test: do NOT add extra fields
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/${isImage ? "image" : "raw"}/upload`,
-    {
-      method: "POST",
-      body: formData,
-    }
-  );
+  // const response = await fetch(
+  //   `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/auto/upload`,
+  //   {
+  //     method: "POST",
+  //     body: formData,
+  //   }
+  // );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Cloudinary upload error response:", errorText);
+  const response = await cloudinary.uploader.upload(pdfUrl, {
+    resource_type: isImage ? "auto" : "raw",
+    filename_override: fileName,
+    folder: uploadPreset,
+  });
+
+  if (!response) {
+    // const errorText = await response.text();
+    console.error("Cloudinary upload error response:");
     throw new Error("Failed to upload file to Cloudinary");
   }
 
-  return response.json();
+  return response;
 };
 
 export const getFileType = (mimeType: string): "image" | "file" => {

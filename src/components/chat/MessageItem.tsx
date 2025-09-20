@@ -237,10 +237,8 @@ export default function MessageItem({ message, onEdit, onReAsk, isStreaming }: M
   const isUser = message.role === "user";
 
   return (
-    <div
-      className={`group relative w-full ${isUser ? "mb-4" : "mb-6"} ${!isUser ? "bg-gray-50/80 dark:bg-gray-800/50" : ""}`}
-    >
-      <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className={`group relative w-full ${!isUser ? "bg-gray-50/80 dark:bg-gray-800/50" : ""}`}>
+      <div className="max-w-4xl mx-auto px-4 pb-2 pt-4">
         <div className="flex gap-4 items-start">
           {/* Avatar */}
           <div className="flex-shrink-0">
@@ -416,7 +414,7 @@ export default function MessageItem({ message, onEdit, onReAsk, isStreaming }: M
 
                 {/* Action buttons for user messages */}
                 {isUser && !isEditing && (
-                  <div className="flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <div className="flex gap-2 mb-0 group-hover:mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
                     <button
                       className="flex items-center gap-1.5 text-xs px-2 py-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-all duration-200"
                       onClick={() => setIsEditing(true)}
